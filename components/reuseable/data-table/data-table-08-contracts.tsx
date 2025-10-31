@@ -555,6 +555,7 @@ export function ContractsDataTable08({
         enableColumnVisibility={true}
         enableViewToggle={true}
       enablePagination={true}
+      storageKey="contracts-table"
       onBulkExport={handleBulkExport}
       onBulkDelete={handleBulkDelete}
       onBulkDuplicate={handleBulkDuplicate}

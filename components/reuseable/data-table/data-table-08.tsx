@@ -53,6 +53,7 @@ export interface DataTable08Props<TData> {
   onBulkDelete?: (selectedRows: TData[]) => Promise<void>
   onBulkStatusChange?: (selectedRows: TData[], status: boolean) => Promise<void>
   onBulkDuplicate?: (selectedRows: TData[]) => Promise<void>
+  storageKey?: string // Unique key for localStorage persistence
 }
 
 function exportToCsv<T>(rows: T[], filename = "data.csv") {
@@ -117,6 +118,64 @@ const DraggableTableHeader = ({ header }: { header: any }) => {
   )
 }
 
+// LocalStorage utilities for column state persistence
+function getStoredColumnOrder(storageKey?: string): string[] | null {
+  if (!storageKey || typeof window === "undefined") return null
+  try {
+    const stored = localStorage.getItem(`${storageKey}:columnOrder`)
+    return stored ? JSON.parse(stored) : null
+  } catch {
+    return null
+  }
+}
+
+function saveColumnOrder(storageKey: string, order: string[]) {
+  if (typeof window === "undefined") return
+  try {
+    localStorage.setItem(`${storageKey}:columnOrder`, JSON.stringify(order))
+  } catch (err) {
+    console.warn("Failed to save column order:", err)
+  }
+}
+
+function getStoredColumnVisibility(storageKey?: string): Record<string, boolean> | null {
+  if (!storageKey || typeof window === "undefined") return null
+  try {
+    const stored = localStorage.getItem(`${storageKey}:columnVisibility`)
+    return stored ? JSON.parse(stored) : null
+  } catch {
+    return null
+  }
+}
+
+function saveColumnVisibility(storageKey: string, visibility: Record<string, boolean>) {
+  if (typeof window === "undefined") return
+  try {
+    localStorage.setItem(`${storageKey}:columnVisibility`, JSON.stringify(visibility))
+  } catch (err) {
+    console.warn("Failed to save column visibility:", err)
+  }
+}
+
+function getStoredViewMode(storageKey?: string): ViewMode | null {
+  if (!storageKey || typeof window === "undefined") return null
+  try {
+    const stored = localStorage.getItem(`${storageKey}:viewMode`)
+    return (stored as ViewMode) || null
+  } catch {
+    return null
+  }
+}
+
+function saveViewMode(storageKey: string, mode: ViewMode) {
+  if (typeof window === "undefined") return
+  try {
+    localStorage.setItem(`${storageKey}:viewMode`, mode)
+  } catch (err) {
+    console.warn("Failed to save view mode:", err)
+  }
+}
+
 export function DataTable08<TData extends Record<string, any>>({
   data: initialData,
   columns,
@@ -139,6 +198,7 @@ export function DataTable08<TData extends Record<string, any>>({
   onBulkDelete,
   onBulkStatusChange,
   onBulkDuplicate,
+  storageKey,
 }: DataTable08Props<TData>) {
   const [data, setData] = useState<TData[]>(initialData)
   const [globalFilter, setGlobalFilter] = useState(q)
@@ -162,26 +222,68 @@ export function DataTable08<TData extends Record<string, any>>({
     }
   }, [data, onDataChange])
 
-  const [columnOrder, setColumnOrder] = useState<string[]>(
-    columns
-      .filter((c) => (c as any).id !== "actions")
-      .map((c) => {
-        const anyCol = c as any
-        return String(anyCol.id ?? anyCol.accessorKey ?? "")
-      })
-      .filter(Boolean)
-  )
-  const [view, setView] = useState<ViewMode>("table")
+  // Initialize column order from localStorage or defaults
+  const defaultColumnOrder = columns
+    .filter((c) => (c as any).id !== "actions")
+    .map((c) => {
+      const anyCol = c as any
+      return String(anyCol.id ?? anyCol.accessorKey ?? "")
+    })
+    .filter(Boolean)
+
+  const [columnOrder, setColumnOrder] = useState<string[]>(() => {
+    const stored = getStoredColumnOrder(storageKey)
+    if (stored && stored.length > 0) {
+      // Validate stored order against current columns
+      const validOrder = stored.filter((id) => defaultColumnOrder.includes(id))
+      const missing = defaultColumnOrder.filter((id) => !stored.includes(id))
+      return [...validOrder, ...missing]
+    }
+    return defaultColumnOrder
+  })
+
+  // Initialize column visibility from localStorage
+  const [columnVisibility, setColumnVisibility] = useState<Record<string, boolean>>(() => {
+    return getStoredColumnVisibility(storageKey) || {}
+  })
+
+  // Initialize view mode from localStorage
+  const [view, setView] = useState<ViewMode>(() => {
+    return getStoredViewMode(storageKey) || "table"
+  })
+
   const dndId = useId()
   const router = useRouter()
   const searchParams = useSearchParams()
 
+  // Save column order to localStorage when it changes
+  useEffect(() => {
+    if (storageKey && columnOrder.length > 0) {
+      saveColumnOrder(storageKey, columnOrder)
+    }
+  }, [columnOrder, storageKey])
+
+  // Save column visibility to localStorage when it changes
+  useEffect(() => {
+    if (storageKey) {
+      saveColumnVisibility(storageKey, columnVisibility)
+    }
+  }, [columnVisibility, storageKey])
+
+  // Save view mode to localStorage when it changes
+  useEffect(() => {
+    if (storageKey) {
+      saveViewMode(storageKey, view)
+    }
+  }, [view, storageKey])
+
   const table = useReactTable({
     data,
     columns,
-    state: { globalFilter, columnOrder },
+    state: { globalFilter, columnOrder, columnVisibility },
     onGlobalFilterChange: setGlobalFilter,
     onColumnOrderChange: setColumnOrder,
+    onColumnVisibilityChange: setColumnVisibility,
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     getSortedRowModel: getSortedRowModel(),
@@ -325,29 +427,29 @@ export function DataTable08<TData extends Record<string, any>>({
       <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-2 w-full sm:w-auto">
           {enableSearch && (
-            <div className="relative w-full sm:w-64">
-              <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" aria-hidden />
-              <Input
-                aria-label="Search"
+          <div className="relative w-full sm:w-64">
+            <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" aria-hidden />
+            <Input
+              aria-label="Search"
                 placeholder={searchPlaceholder}
-                value={globalFilter}
-                onChange={(e) => setGlobalFilter(e.target.value)}
-                className="pl-8"
-              />
-            </div>
+              value={globalFilter}
+              onChange={(e) => setGlobalFilter(e.target.value)}
+              className="pl-8"
+            />
+          </div>
           )}
 
           {enableColumnVisibility && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" className="gap-2" aria-label="Columns">
-                  <Columns3 className="h-4 w-4" /> Columns
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start">
-                <DropdownMenuLabel>Toggle columns</DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                {table.getAllLeafColumns().map((column) => (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" className="gap-2" aria-label="Columns">
+                <Columns3 className="h-4 w-4" /> Columns
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              <DropdownMenuLabel>Toggle columns</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              {table.getAllLeafColumns().map((column) => (
                   <DropdownMenuCheckboxItem
                     key={column.id}
                     className="capitalize"
@@ -356,54 +458,54 @@ export function DataTable08<TData extends Record<string, any>>({
                   >
                     {column.id}
                   </DropdownMenuCheckboxItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
           )}
 
           {enableExport && (
-            <Button
-              variant="outline"
-              className="gap-2"
+          <Button
+            variant="outline"
+            className="gap-2"
               onClick={() => exportToCsv(table.getFilteredRowModel().rows.map((r) => r.original), exportFilename)}
-              aria-label="Export CSV"
-            >
-              <Download className="h-4 w-4" /> Export
-            </Button>
+            aria-label="Export CSV"
+          >
+            <Download className="h-4 w-4" /> Export
+          </Button>
           )}
 
           {enableViewToggle && <Separator orientation="vertical" className="hidden sm:block h-6" />}
 
           {enableViewToggle && cardViewRenderer && (
-            <div className="hidden sm:flex items-center gap-1" role="group" aria-label="View switcher">
-              <Button
-                type="button"
-                variant={view === "table" ? "default" : "outline"}
-                size="sm"
-                className="gap-2"
-                aria-pressed={view === "table"}
-                onClick={() => setView("table")}
-              >
-                <Rows className="h-4 w-4" /> Table
-              </Button>
-              <Button
-                type="button"
-                variant={view === "cards" ? "default" : "outline"}
-                size="sm"
-                className="gap-2"
-                aria-pressed={view === "cards"}
-                onClick={() => setView("cards")}
-              >
-                <ListFilter className="h-4 w-4" /> Cards
-              </Button>
-            </div>
+          <div className="hidden sm:flex items-center gap-1" role="group" aria-label="View switcher">
+            <Button
+              type="button"
+              variant={view === "table" ? "default" : "outline"}
+              size="sm"
+              className="gap-2"
+              aria-pressed={view === "table"}
+              onClick={() => setView("table")}
+            >
+              <Rows className="h-4 w-4" /> Table
+            </Button>
+            <Button
+              type="button"
+              variant={view === "cards" ? "default" : "outline"}
+              size="sm"
+              className="gap-2"
+              aria-pressed={view === "cards"}
+              onClick={() => setView("cards")}
+            >
+              <ListFilter className="h-4 w-4" /> Cards
+            </Button>
+          </div>
           )}
         </div>
 
         {enablePagination && (
-          <div className="text-sm text-muted-foreground">
+        <div className="text-sm text-muted-foreground">
             <Badge variant="outline">{totalCount} results</Badge>
-          </div>
+        </div>
         )}
       </div>
 
@@ -416,29 +518,29 @@ export function DataTable08<TData extends Record<string, any>>({
                 {table.getHeaderGroups().map((hg) => (
                   <TableRow key={hg.id} className="bg-muted/50 [&>th]:border-t-0">
                     {enableRowSelection && (
-                      <TableHead className="w-8">
-                        <Checkbox
-                          checked={table.getIsAllPageRowsSelected() || (table.getIsSomePageRowsSelected() && "indeterminate")}
-                          onCheckedChange={(v) => table.toggleAllPageRowsSelected(!!v)}
+                  <TableHead className="w-8">
+                      <Checkbox
+                        checked={table.getIsAllPageRowsSelected() || (table.getIsSomePageRowsSelected() && "indeterminate")}
+                        onCheckedChange={(v) => table.toggleAllPageRowsSelected(!!v)}
                           aria-label="Select all"
-                        />
-                      </TableHead>
+                      />
+                    </TableHead>
                     )}
-                    <SortableContext items={columnOrder} strategy={horizontalListSortingStrategy}>
+                  <SortableContext items={columnOrder} strategy={horizontalListSortingStrategy}>
                       {hg.headers
                         .filter((h) => (h as any).column.id !== "actions")
                         .map((h) => (
                           <DraggableTableHeader key={h.id} header={h as any} />
-                        ))}
-                    </SortableContext>
+                      ))}
+                  </SortableContext>
                     {actionsColumn &&
                       hg.headers
                         .filter((h) => (h as any).column.id === "actions")
                         .map((h) => (
                           <TableHead key={h.id} className="w-10 text-right">
                             {flexRender(h.column.columnDef.header, h.getContext())}
-                          </TableHead>
-                        ))}
+                      </TableHead>
+                    ))}
                   </TableRow>
                 ))}
               </TableHeader>
@@ -447,9 +549,9 @@ export function DataTable08<TData extends Record<string, any>>({
                   table.getRowModel().rows.map((row) => (
                     <TableRow key={row.id} data-state={row.getIsSelected() && "selected"} className="hover:bg-muted/40">
                       {enableRowSelection && (
-                        <TableCell className="w-8">
+                      <TableCell className="w-8">
                           <Checkbox checked={row.getIsSelected()} onCheckedChange={(v) => row.toggleSelected(!!v)} aria-label={`Select row ${row.id}`} />
-                        </TableCell>
+                      </TableCell>
                       )}
                       {row.getVisibleCells().map((cell) => (
                         <TableCell key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</TableCell>
@@ -497,8 +599,8 @@ export function DataTable08<TData extends Record<string, any>>({
                 </SelectContent>
               </Select>
             </div>
-          </div>
-          <Pagination className="!justify-end">
+    </div>
+          <Pagination className="justify-end!">
             <PaginationContent>
               <PaginationItem>
                 <PaginationLink
@@ -547,6 +649,6 @@ export function DataTable08<TData extends Record<string, any>>({
           </Pagination>
         </div>
       )}
-    </div>
+      </div>
   )
 }

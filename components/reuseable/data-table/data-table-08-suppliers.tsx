@@ -284,6 +284,66 @@ const supplierColumns = (onFieldUpdate: (field: string) => (id: string, value: a
 
 type ViewMode = "table" | "cards"
 
+// LocalStorage utilities for column state persistence
+const STORAGE_KEY = "suppliers-table"
+
+function getStoredColumnOrder(): string[] | null {
+  if (typeof window === "undefined") return null
+  try {
+    const stored = localStorage.getItem(`${STORAGE_KEY}:columnOrder`)
+    return stored ? JSON.parse(stored) : null
+  } catch {
+    return null
+  }
+}
+
+function saveColumnOrder(order: string[]) {
+  if (typeof window === "undefined") return
+  try {
+    localStorage.setItem(`${STORAGE_KEY}:columnOrder`, JSON.stringify(order))
+  } catch (err) {
+    console.warn("Failed to save column order:", err)
+  }
+}
+
+function getStoredColumnVisibility(): Record<string, boolean> | null {
+  if (typeof window === "undefined") return null
+  try {
+    const stored = localStorage.getItem(`${STORAGE_KEY}:columnVisibility`)
+    return stored ? JSON.parse(stored) : null
+  } catch {
+    return null
+  }
+}
+
+function saveColumnVisibility(visibility: Record<string, boolean>) {
+  if (typeof window === "undefined") return
+  try {
+    localStorage.setItem(`${STORAGE_KEY}:columnVisibility`, JSON.stringify(visibility))
+  } catch (err) {
+    console.warn("Failed to save column visibility:", err)
+  }
+}
+
+function getStoredViewMode(): ViewMode | null {
+  if (typeof window === "undefined") return null
+  try {
+    const stored = localStorage.getItem(`${STORAGE_KEY}:viewMode`)
+    return (stored as ViewMode) || null
+  } catch {
+    return null
+  }
+}
+
+function saveViewMode(mode: ViewMode) {
+  if (typeof window === "undefined") return
+  try {
+    localStorage.setItem(`${STORAGE_KEY}:viewMode`, mode)
+  } catch (err) {
+    console.warn("Failed to save view mode:", err)
+  }
+}
+
 export function SuppliersDataTable08({ initialData, totalCount, page, pageSize, q }: { initialData: Supplier[]; totalCount: number; page: number; pageSize: number; q: string }) {
   const [data, setData] = useState<Supplier[]>(initialData)
   const [globalFilter, setGlobalFilter] = useState(q ?? "")
@@ -309,25 +369,64 @@ export function SuppliersDataTable08({ initialData, totalCount, page, pageSize, 
   }
 
   const columns = supplierColumns(handleFieldUpdate)
-  const [columnOrder, setColumnOrder] = useState<string[]>(
-    columns
-      .filter((c) => (c as any).id !== "actions")
-      .map((c) => {
-        const anyCol = c as any
-        return String(anyCol.id ?? anyCol.accessorKey)
-      })
-  )
-  const [view, setView] = useState<ViewMode>("table")
+  
+  // Initialize column order from localStorage or defaults
+  const defaultColumnOrder = columns
+    .filter((c) => (c as any).id !== "actions")
+    .map((c) => {
+      const anyCol = c as any
+      return String(anyCol.id ?? anyCol.accessorKey)
+    })
+
+  const [columnOrder, setColumnOrder] = useState<string[]>(() => {
+    const stored = getStoredColumnOrder()
+    if (stored && stored.length > 0) {
+      // Validate stored order against current columns
+      const validOrder = stored.filter((id) => defaultColumnOrder.includes(id))
+      const missing = defaultColumnOrder.filter((id) => !stored.includes(id))
+      return [...validOrder, ...missing]
+    }
+    return defaultColumnOrder
+  })
+
+  // Initialize column visibility from localStorage
+  const [columnVisibility, setColumnVisibility] = useState<Record<string, boolean>>(() => {
+    return getStoredColumnVisibility() || {}
+  })
+
+  // Initialize view mode from localStorage
+  const [view, setView] = useState<ViewMode>(() => {
+    return getStoredViewMode() || "table"
+  })
+
   const dndId = useId()
   const router = useRouter()
   const searchParams = useSearchParams()
 
+  // Save column order to localStorage when it changes
+  useEffect(() => {
+    if (columnOrder.length > 0) {
+      saveColumnOrder(columnOrder)
+    }
+  }, [columnOrder])
+
+  // Save column visibility to localStorage when it changes
+  useEffect(() => {
+    saveColumnVisibility(columnVisibility)
+  }, [columnVisibility])
+
+  // Save view mode to localStorage when it changes
+  useEffect(() => {
+    saveViewMode(view)
+  }, [view])
+
   const table = useReactTable({
     data,
     columns,
-    state: { globalFilter, columnOrder },
+    state: { globalFilter, columnOrder, columnVisibility },
     onGlobalFilterChange: setGlobalFilter,
     onColumnOrderChange: setColumnOrder,
+    onColumnVisibilityChange: setColumnVisibility,
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     getSortedRowModel: getSortedRowModel(),

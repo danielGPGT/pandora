@@ -395,6 +395,7 @@ export function AuditLogsDataTable({
         enableColumnVisibility={true}
         enableViewToggle={false}
         enablePagination={true}
+        storageKey="audit-logs-table"
         emptyMessage="No audit logs found."
       />
     </div>
