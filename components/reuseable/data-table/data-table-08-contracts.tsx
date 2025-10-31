@@ -331,6 +331,7 @@ function EditableStatusCell({ row, onUpdate }: { row: any; onUpdate: (id: string
 function RowActions({ contract, onDelete }: { contract: Contract; onDelete?: (id: string) => void }) {
   const router = useRouter()
   const [isDeleting, setIsDeleting] = useState(false)
+  const [isDuplicating, setIsDuplicating] = useState(false)
 
   const handleDelete = async () => {
     if (!confirm("Are you sure you want to delete this contract?")) return
@@ -343,6 +344,19 @@ function RowActions({ contract, onDelete }: { contract: Contract; onDelete?: (id
       toast.error("Failed to delete contract", { description: err instanceof Error ? err.message : undefined })
     } finally {
       setIsDeleting(false)
+    }
+  }
+
+  const handleDuplicate = async () => {
+    setIsDuplicating(true)
+    try {
+      await bulkDuplicateContracts([contract.id])
+      toast.success("Contract duplicated")
+      router.refresh()
+    } catch (err) {
+      toast.error("Failed to duplicate contract", { description: err instanceof Error ? err.message : undefined })
+    } finally {
+      setIsDuplicating(false)
     }
   }
 
@@ -362,6 +376,10 @@ function RowActions({ contract, onDelete }: { contract: Contract; onDelete?: (id
         <DropdownMenuItem>
           <Pencil className="mr-2 h-4 w-4" />
           Edit
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={handleDuplicate} disabled={isDuplicating}>
+          <Copy className="mr-2 h-4 w-4" />
+          Duplicate
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={handleDelete} disabled={isDeleting} className="text-destructive">

@@ -391,6 +391,26 @@ body {
   }
 }
 
+@keyframes bubbleFloat {
+  0%   { transform: translate3d(0px, 0px, 0) scale(1);   }
+  25%  { transform: translate3d( 40px, -20px, 0) scale(1.02); }
+  50%  { transform: translate3d(-20px, 30px, 0) scale(0.98); }
+  75%  { transform: translate3d(-40px, -10px, 0) scale(1.01); }
+  100% { transform: translate3d(0px, 0px, 0) scale(1);   }
+}
+
+/* Tailwind-compatible class */
+.animate-bubble {
+  animation: bubbleFloat 18s ease-in-out infinite;
+  will-change: transform;
+}
+
+/* Respect reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .animate-bubble { animation: none; }
+}
+
+
 /* Sonner toast colors - ensure borders are visible */
 [data-sonner-toast] {
   border: 1px solid !important;

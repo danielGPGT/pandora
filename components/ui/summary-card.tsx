@@ -30,7 +30,7 @@ const variantClasses: Record<Variant, string> = {
 
 export function SummaryCard({ title, value, subtitle, icon, variant = "default", delta, className }: SummaryCardProps) {
   return (
-    <Card className={cn("p-4 md:p-5 rounded-xl border bg-card/50 backdrop-blur-xl shadow-sm transition-shadow hover:shadow-md", className)}>
+    <Card className={cn("p-4 md:p-5 rounded-xl border bg-card/80 backdrop-blur-xl shadow-sm transition-shadow hover:shadow-md", className)}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-3">

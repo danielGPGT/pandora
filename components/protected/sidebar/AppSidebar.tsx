@@ -6,6 +6,7 @@ import { useTheme } from "next-themes";
 import {
   LayoutGrid,
   PackageSearch,
+  Calendar,
   Ticket,
   Users,
   Building2,
@@ -14,7 +15,6 @@ import {
   Settings,
   Database,
   Factory,
-  Calendar,
   HelpCircle,
   Search,
   Map,
@@ -59,6 +59,10 @@ const data = {
         {
           title: "Products",
           url: "/products",
+        },
+        {
+          title: "Events",
+          url: "/events",
         },
 
       ],
@@ -150,12 +154,15 @@ const data = {
 };
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
-  const { user } = useUser()
+  const { user, loading } = useUser()
   const { theme } = useTheme()
   const userData = {
-    name: user ? `${user.first_name ?? ''} ${user.last_name ?? ''}`.trim() || user.email : 'User',
+    name:
+      user && (user.first_name || user.last_name)
+        ? `${user.first_name ?? ''} ${user.last_name ?? ''}`.trim()
+        : user?.email ?? (loading ? 'Loading…' : 'User'),
     email: user?.email || '',
-    avatar: '/avatars/user.jpg',
+    avatar: user?.avatar_url,
     organization: user?.organization?.name || 'Organization',
   }
 

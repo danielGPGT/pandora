@@ -625,7 +625,7 @@ export function SuppliersDataTable08({ initialData, totalCount, page, pageSize, 
       {view === "table" ? (
         <div className="rounded-md border overflow-hidden bg-background/50 backdrop-blur-xl">
           <DndContext id={dndId} collisionDetection={closestCenter} modifiers={[restrictToHorizontalAxis]} onDragEnd={handleDragEnd} sensors={sensors}>
-            <Table>
+            <Table className="bg-card/80 backdrop-blur-xl">
               <TableHeader>
                 {table.getHeaderGroups().map((hg) => (
                   <TableRow key={hg.id} className="bg-muted/50 [&>th]:border-t-0">

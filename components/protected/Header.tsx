@@ -8,9 +8,17 @@ import { useUser } from "@/lib/hooks/use-user";
 import { Button } from "../ui/button";
 
 export function Header() {
-  const { user } = useUser();
+  const { user, loading } = useUser();
 
-  const displayName = user ? `${user.first_name ?? ""} ${user.last_name ?? ""}`.trim() || user.email : "User";
+  const hasProfile = Boolean(user?.first_name || user?.last_name);
+  const fullName = hasProfile ? `${user?.first_name ?? ""} ${user?.last_name ?? ""}`.trim() : undefined;
+  const displayName = user
+    ? fullName && fullName.length > 0
+      ? fullName
+      : user.email
+    : loading
+    ? "Loading…"
+    : "User";
   const email = user?.email ?? "";
 
   return (
@@ -45,8 +53,8 @@ export function Header() {
           </div>
           <div className="flex items-center gap-2 pr-2">
             <Avatar className="h-10 w-10">
-              <AvatarImage src="/avatars/user.jpg" alt={displayName} />
-              <AvatarFallback>{displayName.charAt(0).toUpperCase()}</AvatarFallback>
+              {user?.avatar_url ? <AvatarImage src={user.avatar_url} alt={displayName} /> : null}
+              <AvatarFallback>{(fullName?.charAt(0) ?? user?.email?.charAt(0) ?? "U").toUpperCase()}</AvatarFallback>
             </Avatar>
             <div className="hidden sm:flex flex-col leading-tight">
               <span className="text-sm font-medium">{displayName}</span>

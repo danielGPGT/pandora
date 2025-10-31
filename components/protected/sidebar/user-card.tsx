@@ -14,7 +14,7 @@ type UserCardProps = {
   organization?: string
 }
 
-export function UserCard({ name, email, avatar = "/avatars/user.jpg", organization }: UserCardProps) {
+export function UserCard({ name, email, avatar, organization }: UserCardProps) {
   const router = useRouter()
 
   async function onSignOut() {
@@ -28,7 +28,7 @@ export function UserCard({ name, email, avatar = "/avatars/user.jpg", organizati
     <div className="rounded-lg bg-background p-2">
       <div className="flex items-center gap-3">
         <Avatar className="h-9 w-9">
-          <AvatarImage src={avatar} alt={name} />
+          {avatar ? <AvatarImage src={avatar} alt={name} /> : null}
           <AvatarFallback>{name.charAt(0).toUpperCase()}</AvatarFallback>
         </Avatar>
         <div className="min-w-0 flex-1 leading-tight">
