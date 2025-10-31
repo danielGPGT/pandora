@@ -74,9 +74,7 @@ function formatDate(value: string) {
 function formatEventDisplay(event?: Product["event"]) {
   if (!event) return null
   const nameParts = [event.event_name]
-  if (event.event_code) {
-    nameParts.push(`(${event.event_code})`)
-  }
+
   const rangeParts: string[] = []
   if (event.event_date_from) {
     rangeParts.push(formatDate(event.event_date_from))

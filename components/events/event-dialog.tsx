@@ -5,6 +5,8 @@ import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { toast } from "sonner"
 import { useRouter } from "next/navigation"
+import { format } from "date-fns"
+import { type DateRange } from "react-day-picker"
 
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
@@ -16,6 +18,7 @@ import { createEvent, updateEvent, setEventImage } from "@/lib/actions/events"
 import { useUploadEventImage } from "@/lib/hooks/use-upload-event-image"
 import { ImageUploadInput } from "@/components/ui/image-upload-input"
 import { eventFormSchema, type EventFormValues } from "@/lib/validators/event"
+import { DateRangePicker } from "@/components/protected/DateRangePicker"
 
 const eventStatusOptions: ComboboxOption[] = [
   { value: "scheduled", label: "Scheduled" },
@@ -76,6 +79,39 @@ export function EventDialog({ mode, open, onOpenChange, event }: EventDialogProp
     resolver: zodResolver(eventFormSchema),
     defaultValues,
   })
+
+  const eventDateFrom = form.watch("event_date_from")
+  const eventDateTo = form.watch("event_date_to")
+
+  const dateRangeValue = useMemo<DateRange | undefined>(() => {
+    const fromDate = eventDateFrom ? new Date(eventDateFrom) : undefined
+    const toDate = eventDateTo ? new Date(eventDateTo) : undefined
+
+    const validFrom = fromDate && !Number.isNaN(fromDate.getTime()) ? fromDate : undefined
+    const validTo = toDate && !Number.isNaN(toDate.getTime()) ? toDate : undefined
+
+    if (!validFrom && !validTo) return undefined
+
+    return {
+      from: validFrom ?? validTo,
+      to: validTo,
+    }
+  }, [eventDateFrom, eventDateTo])
+
+  const handleDateRangeChange = (range: DateRange | undefined) => {
+    if (!range?.from) {
+      form.setValue("event_date_from", "", { shouldDirty: true, shouldValidate: true })
+      form.setValue("event_date_to", "", { shouldDirty: true, shouldValidate: true })
+      return
+    }
+
+    const fromValue = format(range.from, "yyyy-MM-dd")
+    const endDate = range.to ?? range.from
+    const toValue = format(endDate, "yyyy-MM-dd")
+
+    form.setValue("event_date_from", fromValue, { shouldDirty: true, shouldValidate: true })
+    form.setValue("event_date_to", toValue, { shouldDirty: true, shouldValidate: true })
+  }
 
   useEffect(() => {
     if (open) {
@@ -186,6 +222,11 @@ export function EventDialog({ mode, open, onOpenChange, event }: EventDialogProp
           onSubmit={form.handleSubmit(onSubmit)}
           id="event-dialog-form"
         >
+          <input type="hidden" {...form.register("event_date_from")}
+          />
+          <input type="hidden" {...form.register("event_date_to")}
+          />
+
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="event-name">Event name</Label>
@@ -239,21 +280,19 @@ export function EventDialog({ mode, open, onOpenChange, event }: EventDialogProp
             ) : null}
           </div>
 
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor="event-date-from">Start date</Label>
-              <Input id="event-date-from" type="date" {...form.register("event_date_from")} />
-              {form.formState.errors.event_date_from ? (
-                <p className="text-xs text-destructive">{form.formState.errors.event_date_from.message}</p>
-              ) : null}
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="event-date-to">End date</Label>
-              <Input id="event-date-to" type="date" {...form.register("event_date_to")} />
-              {form.formState.errors.event_date_to ? (
-                <p className="text-xs text-destructive">{form.formState.errors.event_date_to.message}</p>
-              ) : null}
-            </div>
+          <div className="space-y-2">
+            <DateRangePicker
+              label="Event dates"
+              placeholder="Select start and end dates"
+              value={dateRangeValue}
+              onChange={handleDateRangeChange}
+              required
+            />
+            {form.formState.errors.event_date_from ? (
+              <p className="text-xs text-destructive">{form.formState.errors.event_date_from.message}</p>
+            ) : form.formState.errors.event_date_to ? (
+              <p className="text-xs text-destructive">{form.formState.errors.event_date_to.message}</p>
+            ) : null}
           </div>
 
           <div className="space-y-2">

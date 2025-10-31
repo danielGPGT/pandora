@@ -13,10 +13,20 @@ type ProductOverviewCardProps = {
   counts: ProductDetailsResult["counts"]
 }
 
-const metricLabels: Array<{ key: keyof ProductDetailsResult["counts"]; label: string }> = [
-  { key: "options", label: "Options" },
+const metricLabels: Array<{
+  key: keyof ProductDetailsResult["counts"]
+  label: string
+  format?: (counts: ProductDetailsResult["counts"]) => string
+  hideZero?: boolean
+}> = [
+  {
+    key: "options",
+    label: "Options",
+    format: (counts) => (counts.options ? `${counts.optionsActive}/${counts.options}` : "0"),
+  },
   { key: "sellingRates", label: "Selling rates" },
   { key: "supplierRates", label: "Supplier rates" },
+  { key: "allocations", label: "Allocations", hideZero: true },
   { key: "bookings", label: "Bookings" },
 ]
 
@@ -105,12 +115,21 @@ export function ProductOverviewCard({ product, counts }: ProductOverviewCardProp
         <Separator />
 
         <div className="grid gap-3 sm:grid-cols-2">
-          {metricLabels.map(({ key, label }) => (
-            <div key={key} className="rounded-lg border bg-muted/40 p-3">
-              <p className="text-xs text-muted-foreground uppercase tracking-wide">{label}</p>
-              <p className="text-xl font-semibold">{counts[key]}</p>
-            </div>
-          ))}
+          {metricLabels.map(({ key, label, format: formatter, hideZero }) => {
+            const value = counts[key]
+            if (hideZero && typeof value === "number" && value === 0) {
+              return null
+            }
+
+            const display = formatter ? formatter(counts) : typeof value === "number" ? value.toLocaleString() : String(value)
+
+            return (
+              <div key={key} className="rounded-lg border bg-muted/40 p-3">
+                <p className="text-xs text-muted-foreground uppercase tracking-wide">{label}</p>
+                <p className="text-xl font-semibold">{display}</p>
+              </div>
+            )
+          })}
         </div>
       </CardContent>
     </Card>

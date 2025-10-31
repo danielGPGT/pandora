@@ -2,9 +2,16 @@
 
 import { revalidatePath } from "next/cache"
 import { createClient } from "@/lib/supabase/server"
+import { createAuditLog } from "@/lib/audit/audit-log"
 import { eventFormSchema, normalizeEventPayload, type EventFormValues } from "@/lib/validators/event"
 
-async function getCurrentOrganizationId() {
+type AuthContext = {
+  userId: string
+  userTableId: string | null
+  organization_id: string
+}
+
+async function getCurrentUserOrg(): Promise<AuthContext | null> {
   const supabase = await createClient()
   const { data } = await supabase.auth.getUser()
   const user = data.user
@@ -12,62 +19,158 @@ async function getCurrentOrganizationId() {
 
   const { data: appUser } = await supabase
     .from("users")
-    .select("organization_id,is_active")
+    .select("id,organization_id,is_active")
     .eq("auth_id", user.id)
     .maybeSingle()
 
   if (appUser?.organization_id && appUser.is_active !== false) {
-    return appUser.organization_id as string
+    return { userId: user.id, userTableId: appUser.id, organization_id: appUser.organization_id as string }
+  }
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("organization_id")
+    .eq("id", user.id)
+    .maybeSingle()
+
+  if (profile?.organization_id) {
+    const { data: appUserByProfile } = await supabase
+      .from("users")
+      .select("id")
+      .eq("auth_id", user.id)
+      .maybeSingle()
+    return { userId: user.id, userTableId: appUserByProfile?.id ?? null, organization_id: profile.organization_id as string }
+  }
+
+  const { data: defaultMembership } = await supabase
+    .from("organization_members")
+    .select("organization_id")
+    .eq("user_id", user.id)
+    .eq("is_default", true)
+    .maybeSingle()
+
+  if (defaultMembership?.organization_id) {
+    const { data: appUserByMember } = await supabase
+      .from("users")
+      .select("id")
+      .eq("auth_id", user.id)
+      .maybeSingle()
+    return {
+      userId: user.id,
+      userTableId: appUserByMember?.id ?? null,
+      organization_id: defaultMembership.organization_id as string,
+    }
+  }
+
+  const { data: anyMembership } = await supabase
+    .from("organization_members")
+    .select("organization_id")
+    .eq("user_id", user.id)
+    .limit(1)
+    .maybeSingle()
+
+  if (anyMembership?.organization_id) {
+    const { data: appUserByMember } = await supabase
+      .from("users")
+      .select("id")
+      .eq("auth_id", user.id)
+      .maybeSingle()
+    return {
+      userId: user.id,
+      userTableId: appUserByMember?.id ?? null,
+      organization_id: anyMembership.organization_id as string,
+    }
+  }
+
+  const { data: fallbackUser } = await supabase
+    .from("users")
+    .select("id,organization_id")
+    .eq("auth_id", user.id)
+    .maybeSingle()
+
+  if (fallbackUser?.organization_id) {
+    return {
+      userId: user.id,
+      userTableId: fallbackUser.id ?? null,
+      organization_id: fallbackUser.organization_id as string,
+    }
   }
 
   return null
 }
 
-const eventSelect = `
-  *,
-  organization:organizations ( id, name )
-`
-
 export async function createEvent(values: EventFormValues) {
-  const organizationId = await getCurrentOrganizationId()
-  if (!organizationId) throw new Error("Unauthorized")
+  const auth = await getCurrentUserOrg()
+  if (!auth || !auth.organization_id) throw new Error("Unauthorized")
 
   const supabase = await createClient()
   const parsed = eventFormSchema.parse(values)
   const payload = {
     ...normalizeEventPayload(parsed),
-    organization_id: organizationId,
+    organization_id: auth.organization_id,
   }
 
-  const { data, error } = await supabase.from("events").insert(payload).select(eventSelect).single()
+  const { data, error } = await supabase.from("events").insert(payload).select("*").single()
 
   if (error) {
     throw new Error(error.message || "Failed to create event")
   }
 
+  await createAuditLog({
+    organization_id: auth.organization_id,
+    entity_type: "event",
+    entity_id: data.id,
+    action: "create",
+    old_values: null,
+    new_values: data,
+    changed_by: auth.userTableId || null,
+  })
+
   revalidatePath("/events")
+  revalidatePath(`/events/${data.id}`)
   return data
 }
 
 export async function updateEvent(id: string, values: EventFormValues) {
-  const organizationId = await getCurrentOrganizationId()
-  if (!organizationId) throw new Error("Unauthorized")
+  const auth = await getCurrentUserOrg()
+  if (!auth || !auth.organization_id) throw new Error("Unauthorized")
 
   const supabase = await createClient()
   const parsed = eventFormSchema.parse(values)
   const payload = normalizeEventPayload(parsed)
 
+  const { data: existing, error: fetchError } = await supabase
+    .from("events")
+    .select("*")
+    .eq("id", id)
+    .eq("organization_id", auth.organization_id)
+    .maybeSingle()
+
+  if (fetchError) {
+    throw new Error(fetchError.message || "Failed to load event")
+  }
+
   const { data, error } = await supabase
     .from("events")
     .update(payload)
     .eq("id", id)
-    .eq("organization_id", organizationId)
-    .select(eventSelect)
+    .eq("organization_id", auth.organization_id)
+    .select("*")
     .single()
 
   if (error) {
     throw new Error(error.message || "Failed to update event")
   }
+
+  await createAuditLog({
+    organization_id: auth.organization_id,
+    entity_type: "event",
+    entity_id: id,
+    action: "update",
+    old_values: existing ?? null,
+    new_values: data,
+    changed_by: auth.userTableId || null,
+  })
 
   revalidatePath(`/events`)
   revalidatePath(`/events/${id}`)
@@ -75,21 +178,43 @@ export async function updateEvent(id: string, values: EventFormValues) {
 }
 
 export async function setEventImage(id: string, imageUrl: string | null) {
-  const organizationId = await getCurrentOrganizationId()
-  if (!organizationId) throw new Error("Unauthorized")
+  const auth = await getCurrentUserOrg()
+  if (!auth || !auth.organization_id) throw new Error("Unauthorized")
 
   const supabase = await createClient()
+
+  const { data: existing, error: fetchError } = await supabase
+    .from("events")
+    .select("*")
+    .eq("id", id)
+    .eq("organization_id", auth.organization_id)
+    .maybeSingle()
+
+  if (fetchError) {
+    throw new Error(fetchError.message || "Failed to load event")
+  }
+
   const { data, error } = await supabase
     .from("events")
     .update({ event_image_url: imageUrl })
     .eq("id", id)
-    .eq("organization_id", organizationId)
-    .select(eventSelect)
+    .eq("organization_id", auth.organization_id)
+    .select("*")
     .single()
 
   if (error) {
     throw new Error(error.message || "Failed to update event image")
   }
+
+  await createAuditLog({
+    organization_id: auth.organization_id,
+    entity_type: "event",
+    entity_id: id,
+    action: "update",
+    old_values: existing ?? null,
+    new_values: data,
+    changed_by: auth.userTableId || null,
+  })
 
   revalidatePath(`/events/${id}`)
   revalidatePath(`/events`)
@@ -100,7 +225,7 @@ async function duplicateEventInternal(
   supabase: Awaited<ReturnType<typeof createClient>>,
   organizationId: string,
   id: string
-) {
+): Promise<{ inserted: any; original: any }> {
   const { data: original, error } = await supabase
     .from("events")
     .select("*")
@@ -177,39 +302,71 @@ async function duplicateEventInternal(
   const { data: inserted, error: insertError } = await supabase
     .from("events")
     .insert(insertPayload)
-    .select(eventSelect)
+    .select("*")
     .single()
 
   if (insertError) {
     throw new Error(insertError.message || "Failed to duplicate event")
   }
 
-  return inserted
+  return { inserted, original }
 }
 
 export async function duplicateEvent(id: string) {
-  const organizationId = await getCurrentOrganizationId()
-  if (!organizationId) throw new Error("Unauthorized")
+  const auth = await getCurrentUserOrg()
+  if (!auth || !auth.organization_id) throw new Error("Unauthorized")
 
   const supabase = await createClient()
-  const duplicated = await duplicateEventInternal(supabase, organizationId, id)
+  const { inserted, original } = await duplicateEventInternal(supabase, auth.organization_id, id)
+
+  await createAuditLog({
+    organization_id: auth.organization_id,
+    entity_type: "event",
+    entity_id: inserted.id,
+    action: "duplicate",
+    old_values: original,
+    new_values: inserted,
+    changed_by: auth.userTableId || null,
+  })
+
   revalidatePath("/events")
-  return duplicated
+  revalidatePath(`/events/${inserted.id}`)
+  return inserted
 }
 
 export async function deleteEvent(id: string) {
-  const organizationId = await getCurrentOrganizationId()
-  if (!organizationId) throw new Error("Unauthorized")
+  const auth = await getCurrentUserOrg()
+  if (!auth || !auth.organization_id) throw new Error("Unauthorized")
 
   const supabase = await createClient()
+
+  const { data: existing } = await supabase
+    .from("events")
+    .select("*")
+    .eq("id", id)
+    .eq("organization_id", auth.organization_id)
+    .maybeSingle()
+
   const { error } = await supabase
     .from("events")
     .delete()
     .eq("id", id)
-    .eq("organization_id", organizationId)
+    .eq("organization_id", auth.organization_id)
 
   if (error) {
     throw new Error(error.message || "Failed to delete event")
+  }
+
+  if (existing) {
+    await createAuditLog({
+      organization_id: auth.organization_id,
+      entity_type: "event",
+      entity_id: id,
+      action: "delete",
+      old_values: existing,
+      new_values: null,
+      changed_by: auth.userTableId || null,
+    })
   }
 
   revalidatePath("/events")
@@ -217,18 +374,39 @@ export async function deleteEvent(id: string) {
 
 export async function bulkDeleteEvents(ids: string[]) {
   if (!ids.length) return
-  const organizationId = await getCurrentOrganizationId()
-  if (!organizationId) throw new Error("Unauthorized")
+  const auth = await getCurrentUserOrg()
+  if (!auth || !auth.organization_id) throw new Error("Unauthorized")
 
   const supabase = await createClient()
+
+  const { data: existing } = await supabase
+    .from("events")
+    .select("*")
+    .eq("organization_id", auth.organization_id)
+    .in("id", ids)
+
   const { error } = await supabase
     .from("events")
     .delete()
-    .eq("organization_id", organizationId)
+    .eq("organization_id", auth.organization_id)
     .in("id", ids)
 
   if (error) {
     throw new Error(error.message || "Failed to delete events")
+  }
+
+  if (existing) {
+    for (const event of existing) {
+      await createAuditLog({
+        organization_id: auth.organization_id,
+        entity_type: "event",
+        entity_id: event.id,
+        action: "bulk_delete",
+        old_values: event,
+        new_values: null,
+        changed_by: auth.userTableId || null,
+      })
+    }
   }
 
   revalidatePath("/events")
@@ -236,13 +414,26 @@ export async function bulkDeleteEvents(ids: string[]) {
 
 export async function bulkDuplicateEvents(ids: string[]) {
   if (!ids.length) return
-  const organizationId = await getCurrentOrganizationId()
-  if (!organizationId) throw new Error("Unauthorized")
+  const auth = await getCurrentUserOrg()
+  if (!auth || !auth.organization_id) throw new Error("Unauthorized")
 
   const supabase = await createClient()
 
+  const duplicates: Array<{ inserted: any; original: any }> = []
   for (const id of ids) {
-    await duplicateEventInternal(supabase, organizationId, id)
+    duplicates.push(await duplicateEventInternal(supabase, auth.organization_id, id))
+  }
+
+  for (const { inserted, original } of duplicates) {
+    await createAuditLog({
+      organization_id: auth.organization_id,
+      entity_type: "event",
+      entity_id: inserted.id,
+      action: "bulk_duplicate",
+      old_values: original,
+      new_values: inserted,
+      changed_by: auth.userTableId || null,
+    })
   }
 
   revalidatePath("/events")

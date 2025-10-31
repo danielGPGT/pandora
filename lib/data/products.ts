@@ -139,6 +139,25 @@ export async function getProductSummary() {
   }
 }
 
+export type SellingRateDetails = {
+  id: string
+  option_id: string | null
+  rate_name: string | null
+  rate_basis: string
+  pricing_model: string
+  valid_from: string
+  valid_to: string
+  base_price: number
+  currency: string
+  markup_type: string | null
+  markup_amount: number | null
+  pricing_details: Record<string, any>
+  is_active: boolean
+  target_cost: number | null
+  created_at: string
+  updated_at: string
+}
+
 export type ProductDetailsResult = {
   product: {
     id: string
@@ -191,13 +210,21 @@ export type ProductDetailsResult = {
     sort_order: number | null
     created_at: string
     updated_at: string
+    selling_rate_count: number
+    supplier_rate_count: number
+    allocation_count: number
+    upcoming_booking_count: number
+    selling_rates: SellingRateDetails[]
   }>
   counts: {
     options: number
+    optionsActive: number
     sellingRates: number
     supplierRates: number
+    allocations: number
     bookings: number
   }
+  productSellingRates: SellingRateDetails[]
 }
 
 export async function getProductDetails(id: string): Promise<ProductDetailsResult | null> {
@@ -250,7 +277,13 @@ export async function getProductDetails(id: string): Promise<ProductDetailsResul
     return null
   }
 
-  const [{ data: optionsData, error: optionsError }, sellingRatesRes, supplierRatesRes, bookingsRes] = await Promise.all([
+  const [
+    { data: optionsData, error: optionsError },
+    sellingRatesRes,
+    supplierRatesRes,
+    bookingItemsRes,
+    allocationsRes,
+  ] = await Promise.all([
     supabase
       .from("product_options")
       .select("id, option_name, option_code, description, attributes, is_active, sort_order, created_at, updated_at")
@@ -258,23 +291,104 @@ export async function getProductDetails(id: string): Promise<ProductDetailsResul
       .order("sort_order", { ascending: true, nullsFirst: true }),
     supabase
       .from("selling_rates")
-      .select("id", { count: "exact", head: true })
+      .select(
+        "id, product_option_id, rate_name, rate_basis, pricing_model, valid_from, valid_to, base_price, currency, markup_type, markup_amount, pricing_details, is_active, target_cost, created_at, updated_at"
+      )
       .eq("product_id", id)
       .eq("organization_id", organization_id),
     supabase
       .from("supplier_rates")
-      .select("id", { count: "exact", head: true })
+      .select("id, product_option_id")
       .eq("product_id", id)
       .eq("organization_id", organization_id),
     supabase
       .from("booking_items")
-      .select("id", { count: "exact", head: true })
+      .select("id, product_option_id, service_date_from")
+      .eq("product_id", id)
+      .eq("organization_id", organization_id),
+    supabase
+      .from("contract_allocations")
+      .select("id, product_option_id")
       .eq("product_id", id)
       .eq("organization_id", organization_id),
   ])
 
   if (optionsError) {
     console.error("getProductDetails options error", optionsError)
+  }
+
+  const sellingRatesData = sellingRatesRes.data ?? []
+  const supplierRatesData = supplierRatesRes.data ?? []
+  const bookingItemsData = bookingItemsRes.data ?? []
+  const allocationsData = allocationsRes.data ?? []
+
+  type SellingRateRow = NonNullable<typeof sellingRatesData>[number]
+
+  const sellingRateCounts = new Map<string, number>()
+  const sellingRatesByOption = new Map<string | null, Array<{ id: string; option_id: string | null; rate_name: string | null; rate_basis: string; pricing_model: string; valid_from: string; valid_to: string; base_price: number; currency: string; markup_type: string | null; markup_amount: number | null; pricing_details: Record<string, any>; is_active: boolean; target_cost: number | null; created_at: string; updated_at: string }>>()
+
+  const normalizeRate = (rate: SellingRateRow) => {
+    const pricingDetails =
+      rate.pricing_details && typeof rate.pricing_details === "object" && !Array.isArray(rate.pricing_details)
+        ? (rate.pricing_details as Record<string, any>)
+        : {}
+
+    return {
+      id: rate.id,
+      option_id: rate.product_option_id ?? null,
+      rate_name: rate.rate_name ?? null,
+      rate_basis: rate.rate_basis,
+      pricing_model: rate.pricing_model,
+      valid_from: rate.valid_from,
+      valid_to: rate.valid_to,
+      base_price: Number(rate.base_price),
+      currency: rate.currency,
+      markup_type: rate.markup_type ?? null,
+      markup_amount: rate.markup_amount !== null ? Number(rate.markup_amount) : null,
+      pricing_details: pricingDetails,
+      is_active: rate.is_active ?? true,
+      target_cost: rate.target_cost !== null ? Number(rate.target_cost) : null,
+      created_at: rate.created_at,
+      updated_at: rate.updated_at,
+    }
+  }
+
+  for (const rate of sellingRatesData) {
+    const normalized = normalizeRate(rate as SellingRateRow)
+    const optionKey = normalized.option_id
+
+    const current = sellingRatesByOption.get(optionKey) ?? []
+    current.push(normalized)
+    sellingRatesByOption.set(optionKey, current)
+
+    if (normalized.option_id) {
+      sellingRateCounts.set(normalized.option_id, (sellingRateCounts.get(normalized.option_id) ?? 0) + 1)
+    }
+  }
+
+  const supplierRateCounts = new Map<string, number>()
+  for (const rate of supplierRatesData) {
+    if (!rate.product_option_id) continue
+    supplierRateCounts.set(rate.product_option_id, (supplierRateCounts.get(rate.product_option_id) ?? 0) + 1)
+  }
+
+  const allocationCounts = new Map<string, number>()
+  for (const allocation of allocationsData) {
+    if (!allocation.product_option_id) continue
+    allocationCounts.set(allocation.product_option_id, (allocationCounts.get(allocation.product_option_id) ?? 0) + 1)
+  }
+
+  const now = new Date()
+  const upcomingBookingCounts = new Map<string, number>()
+  for (const booking of bookingItemsData) {
+    if (!booking.product_option_id) continue
+    const serviceDate = booking.service_date_from ? new Date(booking.service_date_from) : null
+    if (serviceDate && serviceDate >= now) {
+      upcomingBookingCounts.set(
+        booking.product_option_id,
+        (upcomingBookingCounts.get(booking.product_option_id) ?? 0) + 1
+      )
+    }
   }
 
   const product = {
@@ -308,16 +422,25 @@ export async function getProductDetails(id: string): Promise<ProductDetailsResul
     sort_order: option.sort_order ?? null,
     created_at: option.created_at,
     updated_at: option.updated_at,
+    selling_rate_count: sellingRateCounts.get(option.id) ?? 0,
+    supplier_rate_count: supplierRateCounts.get(option.id) ?? 0,
+    allocation_count: allocationCounts.get(option.id) ?? 0,
+    upcoming_booking_count: upcomingBookingCounts.get(option.id) ?? 0,
+    selling_rates: sellingRatesByOption.get(option.id) ?? [],
   }))
 
   const counts = {
     options: options.length,
-    sellingRates: sellingRatesRes.count ?? 0,
-    supplierRates: supplierRatesRes.count ?? 0,
-    bookings: bookingsRes.count ?? 0,
+    optionsActive: options.filter((option) => option.is_active).length,
+    sellingRates: sellingRatesData.length,
+    supplierRates: supplierRatesData.length,
+    allocations: allocationsData.length,
+    bookings: bookingItemsData.length,
   }
 
-  return { product, options, counts }
+  const productSellingRates = sellingRatesByOption.get(null) ?? []
+
+  return { product, options, counts, productSellingRates }
 }
 
 
