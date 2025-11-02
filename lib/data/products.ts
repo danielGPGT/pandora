@@ -7,6 +7,7 @@ export async function getProductById(id: string) {
     .from("products")
     .select("*")
     .eq("id", id)
+    .is("deleted_at", null) // Exclude soft-deleted
     .maybeSingle()
 
   if (error) {
@@ -85,6 +86,7 @@ export async function getProductsPage(params: ProductsQuery) {
       { count: "exact" }
     )
     .eq("organization_id", organization_id)
+    .is("deleted_at", null) // Exclude soft-deleted
 
   if (params.q) {
     const q = `%${params.q}%`
@@ -119,17 +121,19 @@ export async function getProductSummary() {
   const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString()
 
   const [activeRes, inactiveRes, newRes] = await Promise.all([
-    supabase.from("products").select("id", { count: "exact", head: true }).eq("organization_id", organization_id).eq("is_active", true),
+    supabase.from("products").select("id", { count: "exact", head: true }).eq("organization_id", organization_id).eq("is_active", true).is("deleted_at", null),
     supabase
       .from("products")
       .select("id", { count: "exact", head: true })
       .eq("organization_id", organization_id)
-      .eq("is_active", false),
+      .eq("is_active", false)
+      .is("deleted_at", null),
     supabase
       .from("products")
       .select("id", { count: "exact", head: true })
       .eq("organization_id", organization_id)
-      .gte("created_at", monthStart),
+      .gte("created_at", monthStart)
+      .is("deleted_at", null),
   ])
 
   return {
@@ -225,6 +229,26 @@ export type ProductDetailsResult = {
     bookings: number
   }
   productSellingRates: SellingRateDetails[]
+  auditLog: Array<{
+    id: string
+    entity_type: string
+    entity_id: string
+    action: string
+    old_values: Record<string, any> | null
+    new_values: Record<string, any> | null
+    changed_by: string | null
+    changed_at: string
+    changed_by_user: {
+      id: string
+      email: string | null
+      first_name: string | null
+      last_name: string | null
+    } | null
+  }>
+  loadErrors: {
+    options: boolean
+    auditLog: boolean
+  }
 }
 
 export async function getProductDetails(id: string): Promise<ProductDetailsResult | null> {
@@ -266,6 +290,7 @@ export async function getProductDetails(id: string): Promise<ProductDetailsResul
     )
     .eq("organization_id", organization_id)
     .eq("id", id)
+    .is("deleted_at", null) // Exclude soft-deleted
     .maybeSingle()
 
   if (error) {
@@ -283,11 +308,13 @@ export async function getProductDetails(id: string): Promise<ProductDetailsResul
     supplierRatesRes,
     bookingItemsRes,
     allocationsRes,
+    auditLogRes,
   ] = await Promise.all([
     supabase
       .from("product_options")
       .select("id, option_name, option_code, description, attributes, is_active, sort_order, created_at, updated_at")
       .eq("product_id", id)
+      .is("deleted_at", null) // Exclude soft-deleted
       .order("sort_order", { ascending: true, nullsFirst: true }),
     supabase
       .from("selling_rates")
@@ -295,7 +322,8 @@ export async function getProductDetails(id: string): Promise<ProductDetailsResul
         "id, product_option_id, rate_name, rate_basis, pricing_model, valid_from, valid_to, base_price, currency, markup_type, markup_amount, pricing_details, is_active, target_cost, created_at, updated_at"
       )
       .eq("product_id", id)
-      .eq("organization_id", organization_id),
+      .eq("organization_id", organization_id)
+      .is("deleted_at", null), // Exclude soft-deleted
     supabase
       .from("supplier_rates")
       .select("id, product_option_id")
@@ -311,16 +339,67 @@ export async function getProductDetails(id: string): Promise<ProductDetailsResul
       .select("id, product_option_id")
       .eq("product_id", id)
       .eq("organization_id", organization_id),
+    supabase
+      .from("audit_log")
+      .select(
+        `
+          id,
+          entity_type,
+          entity_id,
+          action,
+          old_values,
+          new_values,
+          changed_by,
+          changed_at,
+          changed_by_user:users!audit_log_changed_by_fkey (
+            id,
+            email,
+            first_name,
+            last_name
+          )
+        `
+      )
+      .eq("organization_id", organization_id)
+      .eq("entity_type", "product")
+      .eq("entity_id", id)
+      .order("changed_at", { ascending: false })
+      .limit(100),
   ])
 
   if (optionsError) {
     console.error("getProductDetails options error", optionsError)
   }
 
+  const logPostgrestError = (context: string, error: any) => {
+    if (!error) return
+    
+    const payload = {
+      code: error.code,
+      message: error.message,
+      details: error.details,
+      hint: error.hint,
+    }
+    
+    if (error.code === "42704") {
+      if (process.env.NODE_ENV !== "production") {
+        console.info(`[ProductDetails] ${context} relation missing`, payload)
+      }
+      return
+    }
+    
+    if (process.env.NODE_ENV !== "production") {
+      console.warn(`[ProductDetails] ${context} query error`, payload)
+    }
+  }
+
+  logPostgrestError("options", optionsError)
+  logPostgrestError("audit_log", auditLogRes.error)
+
   const sellingRatesData = sellingRatesRes.data ?? []
   const supplierRatesData = supplierRatesRes.data ?? []
   const bookingItemsData = bookingItemsRes.data ?? []
   const allocationsData = allocationsRes.data ?? []
+  const auditLogData = auditLogRes.data ?? []
 
   type SellingRateRow = NonNullable<typeof sellingRatesData>[number]
 
@@ -440,7 +519,36 @@ export async function getProductDetails(id: string): Promise<ProductDetailsResul
 
   const productSellingRates = sellingRatesByOption.get(null) ?? []
 
-  return { product, options, counts, productSellingRates }
+  const auditLog = auditLogData.map((log) => ({
+    id: log.id,
+    entity_type: log.entity_type,
+    entity_id: log.entity_id,
+    action: log.action,
+    old_values: log.old_values,
+    new_values: log.new_values,
+    changed_by: log.changed_by,
+    changed_at: log.changed_at,
+    changed_by_user: log.changed_by_user
+      ? {
+          id: log.changed_by_user.id,
+          email: log.changed_by_user.email ?? null,
+          first_name: log.changed_by_user.first_name ?? null,
+          last_name: log.changed_by_user.last_name ?? null,
+        }
+      : null,
+  }))
+
+  return {
+    product,
+    options,
+    counts,
+    productSellingRates,
+    auditLog,
+    loadErrors: {
+      options: !!optionsError,
+      auditLog: !!auditLogRes.error,
+    },
+  }
 }
 
 

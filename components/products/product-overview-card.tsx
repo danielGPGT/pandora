@@ -5,8 +5,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { CalendarDays, Layers } from "lucide-react"
-import { format } from "date-fns"
 import type { ProductDetailsResult } from "@/lib/data/products"
+// Use centralized utilities
+import { formatEventDateRange } from "@/lib/utils/date-range"
 
 type ProductOverviewCardProps = {
   product: ProductDetailsResult["product"]
@@ -24,27 +25,14 @@ const metricLabels: Array<{
     label: "Options",
     format: (counts) => (counts.options ? `${counts.optionsActive}/${counts.options}` : "0"),
   },
-  { key: "sellingRates", label: "Selling rates" },
-  { key: "supplierRates", label: "Supplier rates" },
   { key: "allocations", label: "Allocations", hideZero: true },
   { key: "bookings", label: "Bookings" },
 ]
 
-function formatEventRange(product: ProductDetailsResult["product"]) {
-  const event = product.event
-  if (!event) return null
-  const parts: string[] = []
-  if (event.event_date_from) {
-    parts.push(format(new Date(event.event_date_from), "MMM dd, yyyy"))
-  }
-  if (event.event_date_to && event.event_date_to !== event.event_date_from) {
-    parts.push(format(new Date(event.event_date_to), "MMM dd, yyyy"))
-  }
-  return parts.join(" — ")
-}
+// Formatting function moved to lib/utils/date-range - see imports above
 
 export function ProductOverviewCard({ product, counts }: ProductOverviewCardProps) {
-  const eventDates = formatEventRange(product)
+  const eventDates = product.event ? formatEventDateRange(product.event) : null
 
   return (
     <Card className="overflow-hidden">

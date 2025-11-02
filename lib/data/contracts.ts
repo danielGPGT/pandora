@@ -486,6 +486,7 @@ export async function getContractDetails(contractId: string): Promise<ContractDe
       .from("products")
       .select("id, name, code, product_type_id")
       .in("id", productIds)
+      .is("deleted_at", null) // Exclude soft-deleted
 
     logPostgrestError("products", productsRes.error)
 
@@ -498,6 +499,7 @@ export async function getContractDetails(contractId: string): Promise<ContractDe
       .from("product_options")
       .select("id, option_name, option_code")
       .in("id", productOptionIds)
+      .is("deleted_at", null) // Exclude soft-deleted
 
     logPostgrestError("product_options", productOptionsRes.error)
 

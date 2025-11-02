@@ -1,6 +1,6 @@
 import { GeneralPageLayout } from "@/components/protected/general-page-layout"
 import { SummaryCard } from "@/components/ui/summary-card"
-import { EventsDataTable08, type EventRecord } from "@/components/reuseable/data-table/data-table-08-events"
+import { EventsDataTable08, type EventRecord } from "@/components/reusable/data-table/data-table-08-events"
 import { CalendarDays, CalendarClock, History, Flag } from "lucide-react"
 import { eventsQuerySchema, getEventsPage, getEventsSummary } from "@/lib/data/events"
 import { AddEventButton } from "@/components/events/add-event-button"

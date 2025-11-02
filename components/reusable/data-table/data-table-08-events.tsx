@@ -2,12 +2,11 @@
 
 import { useCallback, useMemo, useState } from "react"
 import { type ColumnDef } from "@tanstack/react-table"
-import { format } from "date-fns"
 import { CalendarDays, MapPin, Ticket, MoreVertical, Eye, Pencil, Copy, Trash2 } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 
-import { DataTable08 } from "@/components/reuseable/data-table/data-table-08"
+import { DataTable08 } from "@/components/reusable/data-table/data-table-08"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -24,6 +23,9 @@ import {
   bulkDeleteEvents,
   bulkDuplicateEvents,
 } from "@/lib/actions/events"
+// Use centralized utilities
+import { formatDateRange } from "@/lib/utils/date-range"
+import { getEventStatusVariant } from "@/lib/utils/status"
 
 export type EventRecord = {
   id: string
@@ -43,34 +45,7 @@ export type EventRecord = {
   updated_at: string
 }
 
-function formatDateRange(from: string, to: string) {
-  try {
-    const formattedFrom = format(new Date(from), "MMM dd, yyyy")
-    const formattedTo = format(new Date(to), "MMM dd, yyyy")
-    if (formattedFrom === formattedTo) return formattedFrom
-    return `${formattedFrom} — ${formattedTo}`
-  } catch {
-    return `${from} – ${to}`
-  }
-}
-
-function getStatusVariant(status: string | null | undefined) {
-  if (!status) return "secondary" as const
-  switch (status.toLowerCase()) {
-    case "scheduled":
-      return "info" as const
-    case "active":
-    case "confirmed":
-      return "success" as const
-    case "completed":
-      return "default" as const
-    case "cancelled":
-    case "canceled":
-      return "destructive" as const
-    default:
-      return "secondary" as const
-  }
-}
+// Formatting functions moved to lib/utils - see imports above
 
 function isUpcoming(event: EventRecord) {
   const today = new Date()
@@ -84,7 +59,7 @@ function isPast(event: EventRecord) {
 
 function EventStatusBadge({ event }: { event: EventRecord }) {
   const status = event.event_status ?? "Scheduled"
-  const variant = getStatusVariant(status)
+  const variant = getEventStatusVariant(status)
   const pillLabel = isPast(event) ? "Past" : isUpcoming(event) ? "Upcoming" : "Ongoing"
 
   return (

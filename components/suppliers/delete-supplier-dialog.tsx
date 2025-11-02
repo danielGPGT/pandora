@@ -8,7 +8,7 @@ import { deleteSupplier } from "@/lib/actions/suppliers"
 import { toast } from "sonner"
 import { Loader2, AlertTriangle } from "lucide-react"
 import { useRouter } from "next/navigation"
-import type { Supplier } from "@/components/reuseable/data-table/data-table-08-suppliers"
+import type { Supplier } from "@/components/reusable/data-table/data-table-08-suppliers"
 
 type DeleteSupplierDialogProps = {
   open: boolean

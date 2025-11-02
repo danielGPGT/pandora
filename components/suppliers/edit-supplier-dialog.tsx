@@ -15,7 +15,7 @@ import { supplierSchema, type SupplierFormData } from "@/lib/suppliers/schema"
 import { generateSupplierCode } from "@/lib/suppliers/utils"
 import { toast } from "sonner"
 import { Loader2, Wand2 } from "lucide-react"
-import type { Supplier } from "@/components/reuseable/data-table/data-table-08-suppliers"
+import type { Supplier } from "@/components/reusable/data-table/data-table-08-suppliers"
 
 type EditSupplierDialogProps = {
   open: boolean

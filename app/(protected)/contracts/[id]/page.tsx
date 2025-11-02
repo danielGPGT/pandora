@@ -1,5 +1,4 @@
 import { notFound } from "next/navigation"
-import { format } from "date-fns"
 import { DetailsPageLayout } from "@/components/protected/details-page-layout"
 import { StatusBadge } from "@/components/ui/status-badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -10,6 +9,17 @@ import { ActivityTimeline, type AuditLogEntry } from "@/components/audit/activit
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { getContractDetails, type ContractDetails } from "@/lib/data/contracts"
 import { Calendar, DollarSign, Percent, FileText, Layers, ClipboardList, Building2, User, Package } from "lucide-react"
+// Use centralized utilities
+import { formatDate } from "@/lib/utils/date"
+import { formatCurrency } from "@/lib/utils/format"
+import { valueOrDash } from "@/lib/utils/value"
+// Use reusable components
+import { InfoRow } from "@/components/reusable/info-row"
+import { SummaryTile } from "@/components/reusable/summary-tile"
+import { EmptyState } from "@/components/reusable/empty-state"
+import { RelationItem } from "@/components/reusable/relation-item"
+import { NotFoundError } from "@/lib/errors"
+import { isContractFile, type ContractFile } from "@/lib/types/contract-files"
 
 type StatusVariant = "success" | "warning" | "info" | "destructive" | "default"
 
@@ -19,33 +29,6 @@ const statusVariantMap: Record<string, StatusVariant> = {
   draft: "default",
   expired: "info",
   cancelled: "destructive",
-}
-
-function formatDate(dateString: string | null | undefined) {
-  if (!dateString) return "-"
-  try {
-    return format(new Date(dateString), "MMM dd, yyyy")
-  } catch {
-    return dateString
-  }
-}
-
-function formatCurrency(amount: number | null | undefined, currency: string | null | undefined) {
-  if (amount === null || amount === undefined) return "-"
-  try {
-    return new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: currency || "USD",
-      maximumFractionDigits: 0,
-    }).format(amount)
-  } catch {
-    return `${amount}`
-  }
-}
-
-function valueOrDash(value: string | number | null | undefined) {
-  if (value === null || value === undefined || value === "") return "-"
-  return value
 }
 
 function buildAuditEntries(trail: ContractDetails["auditTrail"]): AuditLogEntry[] {
@@ -143,11 +126,14 @@ export default async function ContractDetailsPage({ params }: { params: Promise<
               </CardHeader>
               <CardContent className="space-y-3">
                 <InfoRow label="Contract Number" value={contract.contract_number} />
-                <InfoRow label="Contract Name" value={contract.contract_name || "-"} />
+                <InfoRow label="Contract Name" value={valueOrDash(contract.contract_name)} />
                 <InfoRow label="Status" value={<StatusBadge variant={statusVariant}>{contract.status || "-"}</StatusBadge>} />
                 <InfoRow label="Type" value={valueOrDash(contract.contract_type)} />
                 <InfoRow label="Currency" value={contract.currency || "USD"} />
-                <InfoRow label="Created" value={`${formatDate(contract.created_at)} by ${contract.owner?.first_name || contract.owner?.email || "Unknown"}`} />
+                <InfoRow 
+                  label="Created" 
+                  value={`${formatDate(contract.created_at)} by ${contract.owner?.first_name || contract.owner?.email || "Unknown"}`} 
+                />
                 <InfoRow label="Last Updated" value={formatDate(contract.updated_at)} />
               </CardContent>
             </Card>
@@ -206,19 +192,26 @@ export default async function ContractDetailsPage({ params }: { params: Promise<
               </CardHeader>
               <CardContent>
                 <ul className="space-y-2 text-sm">
-                  {contract.contract_files.map((file: any, idx: number) => (
-                    <li key={file.id ?? idx} className="flex items-center justify-between rounded-md border px-3 py-2">
-                      <div className="flex items-center gap-2 text-muted-foreground">
-                        <FileText className="h-4 w-4" />
-                        <span>{file.name || file.filename || `File ${idx + 1}`}</span>
-                      </div>
-                      {file.url ? (
-                        <a href={file.url} target="_blank" rel="noopener noreferrer" className="text-xs font-medium text-primary hover:underline">
-                          Open
-                        </a>
-                      ) : null}
-                    </li>
-                  ))}
+                  {contract.contract_files
+                    .filter(isContractFile)
+                    .map((file: ContractFile, idx: number) => (
+                      <li key={file.id ?? idx} className="flex items-center justify-between rounded-md border px-3 py-2">
+                        <div className="flex items-center gap-2 text-muted-foreground">
+                          <FileText className="h-4 w-4" />
+                          <span>{file.name || file.filename || `File ${idx + 1}`}</span>
+                        </div>
+                        {file.url ? (
+                          <a 
+                            href={file.url} 
+                            target="_blank" 
+                            rel="noopener noreferrer" 
+                            className="text-xs font-medium text-primary hover:underline"
+                          >
+                            Open
+                          </a>
+                        ) : null}
+                      </li>
+                    ))}
                 </ul>
               </CardContent>
             </Card>
@@ -450,43 +443,7 @@ export default async function ContractDetailsPage({ params }: { params: Promise<
   )
 }
 
-function SummaryTile({ icon, label, value, helper }: { icon?: React.ReactNode; label: string; value: React.ReactNode; helper?: React.ReactNode }) {
-  return (
-    <Card className="p-4">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{label}</div>
-          <div className="text-lg font-semibold mt-1">{value}</div>
-          {helper ? <div className="text-xs text-muted-foreground mt-1">{helper}</div> : null}
-        </div>
-        {icon ? <div className="text-muted-foreground">{icon}</div> : null}
-      </div>
-    </Card>
-  )
-}
-
-function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div className="flex items-center justify-between gap-4 text-sm">
-      <span className="text-muted-foreground">{label}</span>
-      <span className="font-medium text-right max-w-[60%] truncate">{value}</span>
-    </div>
-  )
-}
-
-function RelationItem({ icon, label, primary, secondary, helper }: { icon?: React.ReactNode; label: string; primary: React.ReactNode; secondary?: React.ReactNode; helper?: React.ReactNode }) {
-  return (
-    <div className="flex items-start gap-3">
-      {icon}
-      <div className="space-y-1">
-        <div className="text-xs uppercase tracking-wide text-muted-foreground font-semibold">{label}</div>
-        <div className="text-sm font-medium">{primary}</div>
-        {secondary ? <div className="text-xs text-muted-foreground">{secondary}</div> : null}
-        {helper ? <div className="text-xs text-muted-foreground">{helper}</div> : null}
-      </div>
-    </div>
-  )
-}
+// Components moved to reusable folder - see imports above
 
 function TermsBlock({ title, text }: { title: string; text: string }) {
   return (
@@ -506,15 +463,5 @@ function SummaryStat({ label, value }: { label: string; value: number }) {
   )
 }
 
-function EmptyState({ icon, title, description }: { icon: React.ReactNode; title: string; description: string }) {
-  return (
-    <Card className="border-dashed">
-      <CardContent className="flex flex-col items-center justify-center py-12 text-center space-y-3">
-        <div>{icon}</div>
-        <div className="text-lg font-semibold">{title}</div>
-        <p className="text-sm text-muted-foreground max-w-sm">{description}</p>
-      </CardContent>
-    </Card>
-  )
-}
+// EmptyState component moved to reusable folder - see imports above
 

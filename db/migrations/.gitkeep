@@ -1,0 +1,14 @@
+# Database Migrations
+
+This directory contains versioned database migrations.
+
+## Migration Naming Convention
+
+Use the format: `YYYYMMDDHHMMSS_description.sql`
+
+Example: `20250101120000_add_selling_rates_table.sql`
+
+## Running Migrations
+
+See `scripts/db/migrate.sh` or use your Supabase migration tooling.
+

@@ -2,12 +2,15 @@
 
 import { useEffect, useState } from "react"
 import { type ColumnDef } from "@tanstack/react-table"
-import { format } from "date-fns"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { StatusBadge } from "@/components/ui/status-badge"
-import { DataTable08 } from "@/components/reuseable/data-table/data-table-08"
+import { DataTable08 } from "@/components/reusable/data-table/data-table-08"
+// Use centralized utilities
+import { formatDate } from "@/lib/utils/date"
+import { formatEventDateRange } from "@/lib/utils/date-range"
+import { getSupplierStatusVariant } from "@/lib/utils/status"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -63,28 +66,17 @@ export type Product = {
   } | null
 }
 
-function formatDate(value: string) {
-  try {
-    return format(new Date(value), "MMM dd, yyyy")
-  } catch {
-    return value
-  }
-}
+// Formatting functions moved to lib/utils - see imports above
 
 function formatEventDisplay(event?: Product["event"]) {
   if (!event) return null
+  
   const nameParts = [event.event_name]
-
-  const rangeParts: string[] = []
-  if (event.event_date_from) {
-    rangeParts.push(formatDate(event.event_date_from))
-  }
-  if (event.event_date_to && event.event_date_to !== event.event_date_from) {
-    rangeParts.push(formatDate(event.event_date_to))
-  }
+  const dateRange = formatEventDateRange(event)
+  
   return {
     name: nameParts.join(" "),
-    dates: rangeParts.length ? rangeParts.join(" — ") : null,
+    dates: dateRange || null,
   }
 }
 
@@ -92,7 +84,11 @@ function ProductStatusBadge({ isActive }: { isActive: boolean | null | undefined
   if (isActive === null || isActive === undefined) {
     return <StatusBadge variant="info">Unknown</StatusBadge>
   }
-  return <StatusBadge variant={isActive ? "success" : "warning"}>{isActive ? "Active" : "Inactive"}</StatusBadge>
+  
+  const variant = getSupplierStatusVariant(isActive)
+  const label = isActive ? "Active" : "Inactive"
+  
+  return <StatusBadge variant={variant}>{label}</StatusBadge>
 }
 
 function RowActions({

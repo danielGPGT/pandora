@@ -144,6 +144,7 @@ export async function updateEvent(id: string, values: EventFormValues) {
     .select("*")
     .eq("id", id)
     .eq("organization_id", auth.organization_id)
+    .is("deleted_at", null) // Exclude soft-deleted
     .maybeSingle()
 
   if (fetchError) {
@@ -155,6 +156,7 @@ export async function updateEvent(id: string, values: EventFormValues) {
     .update(payload)
     .eq("id", id)
     .eq("organization_id", auth.organization_id)
+    .is("deleted_at", null) // Can't update soft-deleted
     .select("*")
     .single()
 
@@ -340,34 +342,83 @@ export async function deleteEvent(id: string) {
 
   const supabase = await createClient()
 
-  const { data: existing } = await supabase
+  const { data: existing, error: fetchError } = await supabase
     .from("events")
     .select("*")
     .eq("id", id)
     .eq("organization_id", auth.organization_id)
+    .is("deleted_at", null) // Only soft delete if not already deleted
     .maybeSingle()
 
+  if (fetchError || !existing) {
+    throw new Error("Event not found or already deleted")
+  }
+
+  // Soft delete: set deleted_at timestamp
+  const deletedAt = new Date().toISOString()
   const { error } = await supabase
     .from("events")
-    .delete()
+    .update({ deleted_at: deletedAt })
     .eq("id", id)
     .eq("organization_id", auth.organization_id)
+    .is("deleted_at", null) // Prevent double deletion
 
   if (error) {
     throw new Error(error.message || "Failed to delete event")
   }
 
-  if (existing) {
-    await createAuditLog({
-      organization_id: auth.organization_id,
-      entity_type: "event",
-      entity_id: id,
-      action: "delete",
-      old_values: existing,
-      new_values: null,
-      changed_by: auth.userTableId || null,
-    })
+  await createAuditLog({
+    organization_id: auth.organization_id,
+    entity_type: "event",
+    entity_id: id,
+    action: "delete",
+    old_values: existing,
+    new_values: { ...existing, deleted_at: deletedAt },
+    changed_by: auth.userTableId || null,
+  })
+
+  revalidatePath("/events")
+}
+
+export async function restoreEvent(id: string) {
+  const auth = await getCurrentUserOrg()
+  if (!auth || !auth.organization_id) throw new Error("Unauthorized")
+
+  const supabase = await createClient()
+
+  const { data: deletedEvent, error: fetchError } = await supabase
+    .from("events")
+    .select("*")
+    .eq("id", id)
+    .eq("organization_id", auth.organization_id)
+    .not("deleted_at", "is", null) // Only restore if deleted
+    .maybeSingle()
+
+  if (fetchError || !deletedEvent) {
+    throw new Error("Event not found or not deleted")
   }
+
+  // Restore: clear deleted_at
+  const { error } = await supabase
+    .from("events")
+    .update({ deleted_at: null })
+    .eq("id", id)
+    .eq("organization_id", auth.organization_id)
+    .not("deleted_at", "is", null) // Only restore if currently deleted
+
+  if (error) {
+    throw new Error(error.message || "Failed to restore event")
+  }
+
+  await createAuditLog({
+    organization_id: auth.organization_id,
+    entity_type: "event",
+    entity_id: id,
+    action: "restore",
+    old_values: deletedEvent,
+    new_values: { ...deletedEvent, deleted_at: null },
+    changed_by: auth.userTableId || null,
+  })
 
   revalidatePath("/events")
 }
@@ -384,29 +435,36 @@ export async function bulkDeleteEvents(ids: string[]) {
     .select("*")
     .eq("organization_id", auth.organization_id)
     .in("id", ids)
+    .is("deleted_at", null) // Only soft delete if not already deleted
 
+  if (!existing || existing.length === 0) {
+    throw new Error("No events found to delete")
+  }
+
+  // Soft delete: set deleted_at timestamp
+  const deletedAt = new Date().toISOString()
   const { error } = await supabase
     .from("events")
-    .delete()
-    .eq("organization_id", auth.organization_id)
+    .update({ deleted_at: deletedAt })
     .in("id", ids)
+    .eq("organization_id", auth.organization_id)
+    .is("deleted_at", null) // Prevent double deletion
 
   if (error) {
     throw new Error(error.message || "Failed to delete events")
   }
 
-  if (existing) {
-    for (const event of existing) {
-      await createAuditLog({
-        organization_id: auth.organization_id,
-        entity_type: "event",
-        entity_id: event.id,
-        action: "bulk_delete",
-        old_values: event,
-        new_values: null,
-        changed_by: auth.userTableId || null,
-      })
-    }
+  // Audit log for each deleted event
+  for (const event of existing) {
+    await createAuditLog({
+      organization_id: auth.organization_id,
+      entity_type: "event",
+      entity_id: event.id,
+      action: "delete",
+      old_values: event,
+      new_values: { ...event, deleted_at: deletedAt },
+      changed_by: auth.userTableId || null,
+    })
   }
 
   revalidatePath("/events")

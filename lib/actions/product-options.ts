@@ -86,6 +86,7 @@ async function getNextSortOrder(productId: string) {
     .from("product_options")
     .select("sort_order")
     .eq("product_id", productId)
+    .is("deleted_at", null) // Exclude soft-deleted
     .order("sort_order", { ascending: false, nullsFirst: false })
     .limit(1)
 
@@ -156,6 +157,7 @@ export async function updateProductOption(optionId: string, values: ProductOptio
     .from("product_options")
     .select("*")
     .eq("id", optionId)
+    .is("deleted_at", null) // Exclude soft-deleted
     .maybeSingle()
 
   if (existingError || !existing) {
@@ -170,11 +172,57 @@ export async function updateProductOption(optionId: string, values: ProductOptio
     .from("product_options")
     .update(payload)
     .eq("id", optionId)
+    .is("deleted_at", null) // Can't update soft-deleted
     .select("*")
     .single()
 
   if (error) {
     throw new Error(error.message || "Failed to update product option")
+  }
+
+  await createAuditLog({
+    organization_id: auth.organization_id,
+    entity_type: "product_option",
+    entity_id: optionId,
+    action: "update",
+    old_values: existing,
+    new_values: data,
+    changed_by: auth.userTableId,
+  })
+
+  revalidatePath(`/products/${existing.product_id}`)
+  revalidatePath("/products")
+  return data
+}
+
+export async function updateProductOptionStatus(optionId: string, isActive: boolean) {
+  const auth = await getCurrentUserOrg()
+  if (!auth) throw new Error("Unauthorized")
+
+  const supabase = await createClient()
+  const { data: existing, error: existingError } = await supabase
+    .from("product_options")
+    .select("*")
+    .eq("id", optionId)
+    .is("deleted_at", null) // Exclude soft-deleted
+    .maybeSingle()
+
+  if (existingError || !existing) {
+    throw new Error("Product option not found")
+  }
+
+  await ensureProductOwnership(existing.product_id, auth.organization_id)
+
+  const { data, error } = await supabase
+    .from("product_options")
+    .update({ is_active: isActive, updated_at: new Date().toISOString() })
+    .eq("id", optionId)
+    .is("deleted_at", null) // Can't update soft-deleted
+    .select("*")
+    .single()
+
+  if (error) {
+    throw new Error(error.message || "Failed to update product option status")
   }
 
   await createAuditLog({
@@ -201,6 +249,7 @@ export async function duplicateProductOption(optionId: string) {
     .from("product_options")
     .select("*")
     .eq("id", optionId)
+    .is("deleted_at", null) // Can't duplicate soft-deleted
     .maybeSingle()
 
   if (existingError || !existing) {
@@ -219,6 +268,7 @@ export async function duplicateProductOption(optionId: string) {
       .select("id")
       .eq("product_id", existing.product_id)
       .eq("option_name", name)
+      .is("deleted_at", null) // Exclude soft-deleted
       .limit(1)
 
     if (!conflict || conflict.length === 0) break
@@ -234,6 +284,7 @@ export async function duplicateProductOption(optionId: string) {
       .select("id")
       .eq("product_id", existing.product_id)
       .eq("option_code", codeBase)
+      .is("deleted_at", null) // Exclude soft-deleted
       .limit(1)
 
     if (!codeConflict || codeConflict.length === 0) break
@@ -285,18 +336,22 @@ export async function deleteProductOption(optionId: string) {
     .from("product_options")
     .select("*")
     .eq("id", optionId)
+    .is("deleted_at", null) // Only soft delete if not already deleted
     .maybeSingle()
 
   if (existingError || !existing) {
-    throw new Error("Product option not found")
+    throw new Error("Product option not found or already deleted")
   }
 
   await ensureProductOwnership(existing.product_id, auth.organization_id)
 
+  // Soft delete: set deleted_at timestamp
+  const deletedAt = new Date().toISOString()
   const { error } = await supabase
     .from("product_options")
-    .delete()
+    .update({ deleted_at: deletedAt })
     .eq("id", optionId)
+    .is("deleted_at", null) // Prevent double deletion
 
   if (error) {
     throw new Error(error.message || "Failed to delete product option")
@@ -308,11 +363,54 @@ export async function deleteProductOption(optionId: string) {
     entity_id: optionId,
     action: "delete",
     old_values: existing,
-    new_values: null,
+    new_values: { ...existing, deleted_at: deletedAt },
     changed_by: auth.userTableId,
   })
 
   revalidatePath(`/products/${existing.product_id}`)
+  revalidatePath("/products")
+}
+
+export async function restoreProductOption(optionId: string) {
+  const auth = await getCurrentUserOrg()
+  if (!auth) throw new Error("Unauthorized")
+
+  const supabase = await createClient()
+  const { data: deletedOption, error: fetchError } = await supabase
+    .from("product_options")
+    .select("*")
+    .eq("id", optionId)
+    .not("deleted_at", "is", null) // Only restore if deleted
+    .maybeSingle()
+
+  if (fetchError || !deletedOption) {
+    throw new Error("Product option not found or not deleted")
+  }
+
+  await ensureProductOwnership(deletedOption.product_id, auth.organization_id)
+
+  // Restore: clear deleted_at
+  const { error } = await supabase
+    .from("product_options")
+    .update({ deleted_at: null })
+    .eq("id", optionId)
+    .not("deleted_at", "is", null) // Only restore if currently deleted
+
+  if (error) {
+    throw new Error(error.message || "Failed to restore product option")
+  }
+
+  await createAuditLog({
+    organization_id: auth.organization_id,
+    entity_type: "product_option",
+    entity_id: optionId,
+    action: "restore",
+    old_values: deletedOption,
+    new_values: { ...deletedOption, deleted_at: null },
+    changed_by: auth.userTableId,
+  })
+
+  revalidatePath(`/products/${deletedOption.product_id}`)
   revalidatePath("/products")
 }
 
@@ -326,6 +424,7 @@ export async function bulkUpdateProductOptionStatus(optionIds: string[], isActiv
     .from("product_options")
     .select("*")
     .in("id", optionIds)
+    .is("deleted_at", null) // Exclude soft-deleted
 
   if (!existing || !existing.length) return
 
@@ -336,6 +435,7 @@ export async function bulkUpdateProductOptionStatus(optionIds: string[], isActiv
     .from("product_options")
     .update({ is_active: isActive, updated_at: new Date().toISOString() })
     .in("id", optionIds)
+    .is("deleted_at", null) // Can't update soft-deleted
     .select("*")
 
   if (error) {
@@ -370,16 +470,22 @@ export async function bulkDeleteProductOptions(optionIds: string[]) {
     .from("product_options")
     .select("*")
     .in("id", optionIds)
+    .is("deleted_at", null) // Only soft delete if not already deleted
 
-  if (!existing?.length) return
+  if (!existing?.length) {
+    throw new Error("No options found to delete")
+  }
 
   const productId = existing[0].product_id
   await ensureProductOwnership(productId, auth.organization_id)
 
+  // Soft delete: set deleted_at timestamp
+  const deletedAt = new Date().toISOString()
   const { error } = await supabase
     .from("product_options")
-    .delete()
+    .update({ deleted_at: deletedAt })
     .in("id", optionIds)
+    .is("deleted_at", null) // Prevent double deletion
 
   if (error) {
     throw new Error(error.message || "Failed to delete options")
@@ -390,9 +496,9 @@ export async function bulkDeleteProductOptions(optionIds: string[]) {
       organization_id: auth.organization_id,
       entity_type: "product_option",
       entity_id: option.id,
-      action: "bulk_delete",
+      action: "delete",
       old_values: option,
-      new_values: null,
+      new_values: { ...option, deleted_at: deletedAt },
       changed_by: auth.userTableId,
     })
   }

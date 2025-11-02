@@ -78,6 +78,7 @@ export async function updateProduct(id: string, data: Record<string, any>) {
       .eq("organization_id", auth.organization_id)
       .eq("code", parsed.code)
       .neq("id", id)
+      .is("deleted_at", null) // Exclude soft-deleted
       .limit(1)
 
     if (existing && existing.length > 0) {
@@ -90,6 +91,7 @@ export async function updateProduct(id: string, data: Record<string, any>) {
     .select("*")
     .eq("id", id)
     .eq("organization_id", auth.organization_id)
+    .is("deleted_at", null) // Exclude soft-deleted
     .maybeSingle()
 
   const updatePayload: Record<string, any> = {
@@ -235,18 +237,27 @@ export async function deleteProduct(id: string) {
 
   const supabase = await createClient()
 
-  const { data: oldProduct } = await supabase
+  // Get existing product before soft delete
+  const { data: oldProduct, error: fetchError } = await supabase
     .from("products")
     .select("*")
     .eq("id", id)
     .eq("organization_id", auth.organization_id)
+    .is("deleted_at", null) // Only soft delete if not already deleted
     .maybeSingle()
 
+  if (fetchError || !oldProduct) {
+    throw new Error("Product not found or already deleted")
+  }
+
+  // Soft delete: set deleted_at timestamp
+  const deletedAt = new Date().toISOString()
   const { error } = await supabase
     .from("products")
-    .delete()
+    .update({ deleted_at: deletedAt })
     .eq("id", id)
     .eq("organization_id", auth.organization_id)
+    .is("deleted_at", null) // Prevent double deletion
 
   if (error) {
     throw new Error(error.message || "Failed to delete product")
@@ -257,8 +268,52 @@ export async function deleteProduct(id: string) {
     entity_type: "product",
     entity_id: id,
     action: "delete",
-    old_values: oldProduct || null,
-    new_values: null,
+    old_values: oldProduct,
+    new_values: { ...oldProduct, deleted_at: deletedAt },
+    changed_by: auth.userTableId || null,
+  })
+
+  revalidatePath("/products")
+}
+
+export async function restoreProduct(id: string) {
+  const auth = await getCurrentUserOrg()
+  if (!auth) throw new Error("Unauthorized")
+
+  const supabase = await createClient()
+
+  // Get existing product before restore
+  const { data: deletedProduct, error: fetchError } = await supabase
+    .from("products")
+    .select("*")
+    .eq("id", id)
+    .eq("organization_id", auth.organization_id)
+    .not("deleted_at", "is", null) // Only restore if deleted
+    .maybeSingle()
+
+  if (fetchError || !deletedProduct) {
+    throw new Error("Product not found or not deleted")
+  }
+
+  // Restore: clear deleted_at
+  const { error } = await supabase
+    .from("products")
+    .update({ deleted_at: null })
+    .eq("id", id)
+    .eq("organization_id", auth.organization_id)
+    .not("deleted_at", "is", null) // Only restore if currently deleted
+
+  if (error) {
+    throw new Error(error.message || "Failed to restore product")
+  }
+
+  await createAuditLog({
+    organization_id: auth.organization_id,
+    entity_type: "product",
+    entity_id: id,
+    action: "restore",
+    old_values: deletedProduct,
+    new_values: { ...deletedProduct, deleted_at: null },
     changed_by: auth.userTableId || null,
   })
 
@@ -276,6 +331,7 @@ export async function duplicateProduct(id: string) {
     .select("*")
     .eq("id", id)
     .eq("organization_id", auth.organization_id)
+    .is("deleted_at", null) // Can't duplicate soft-deleted
     .maybeSingle()
 
   if (fetchError || !original) {
@@ -290,6 +346,7 @@ export async function duplicateProduct(id: string) {
       .select("id")
       .eq("organization_id", auth.organization_id)
       .eq("code", newCode)
+      .is("deleted_at", null) // Exclude soft-deleted
       .limit(1)
 
     if (!existing || existing.length === 0) break
@@ -344,36 +401,50 @@ export async function bulkDeleteProducts(ids: string[]) {
   const auth = await getCurrentUserOrg()
   if (!auth) throw new Error("Unauthorized")
 
+  if (!ids.length) return
+
   const supabase = await createClient()
 
-  const { data: oldProducts } = await supabase
+  // Get existing products before soft delete
+  const { data: existingProducts, error: fetchError } = await supabase
     .from("products")
     .select("*")
     .in("id", ids)
     .eq("organization_id", auth.organization_id)
+    .is("deleted_at", null) // Only soft delete if not already deleted
 
+  if (fetchError) {
+    throw new Error("Failed to fetch products")
+  }
+
+  if (!existingProducts || existingProducts.length === 0) {
+    throw new Error("No products found to delete")
+  }
+
+  // Soft delete: set deleted_at timestamp
+  const deletedAt = new Date().toISOString()
   const { error } = await supabase
     .from("products")
-    .delete()
+    .update({ deleted_at: deletedAt })
     .in("id", ids)
     .eq("organization_id", auth.organization_id)
+    .is("deleted_at", null) // Prevent double deletion
 
   if (error) {
     throw new Error(error.message || "Failed to delete products")
   }
 
-  if (oldProducts) {
-    for (const product of oldProducts) {
-      await createAuditLog({
-        organization_id: auth.organization_id,
-        entity_type: "product",
-        entity_id: product.id,
-        action: "bulk_delete",
-        old_values: product,
-        new_values: null,
-        changed_by: auth.userTableId || null,
-      })
-    }
+  // Audit log for each deleted product
+  for (const product of existingProducts) {
+    await createAuditLog({
+      organization_id: auth.organization_id,
+      entity_type: "product",
+      entity_id: product.id,
+      action: "delete",
+      old_values: product,
+      new_values: { ...product, deleted_at: deletedAt },
+      changed_by: auth.userTableId || null,
+    })
   }
 
   revalidatePath("/products")
@@ -415,12 +486,14 @@ export async function bulkUpdateProductStatus(ids: string[], isActive: boolean) 
     .select("*")
     .in("id", ids)
     .eq("organization_id", auth.organization_id)
+    .is("deleted_at", null) // Exclude soft-deleted
 
   const { data: updatedProducts, error } = await supabase
     .from("products")
     .update({ is_active: isActive, updated_at: new Date().toISOString() })
     .in("id", ids)
     .eq("organization_id", auth.organization_id)
+    .is("deleted_at", null) // Can't update soft-deleted
     .select()
 
   if (error) {
@@ -514,6 +587,7 @@ export async function isProductCodeAvailable(code: string, productTypeId: string
     .eq("organization_id", auth.organization_id)
     .eq("product_type_id", productTypeId)
     .eq("code", code)
+    .is("deleted_at", null) // Exclude soft-deleted
     .limit(1)
 
   if (excludeId) {

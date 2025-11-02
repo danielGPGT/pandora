@@ -4,9 +4,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Separator } from "@/components/ui/separator"
 import { Badge } from "@/components/ui/badge"
 import { CalendarClock, Hash, MapPin, User } from "lucide-react"
-import { format } from "date-fns"
 import type { ProductDetailsResult } from "@/lib/data/products"
 import { productTypeAttributeMap } from "@/components/products/product-attribute-editor"
+// Use centralized utilities
+import { formatDateTime } from "@/lib/utils/date"
 
 type ProductAttributesCardProps = {
   product: ProductDetailsResult["product"]
@@ -28,13 +29,7 @@ function formatValue(value: unknown): string {
   return String(value)
 }
 
-function formatDateTime(value: string) {
-  try {
-    return format(new Date(value), "MMM dd, yyyy HH:mm")
-  } catch {
-    return value
-  }
-}
+// Formatting function moved to lib/utils/date - see imports above
 
 export function ProductAttributesCard({ product }: ProductAttributesCardProps) {
   const typeKey = product.product_type?.type_code?.toLowerCase() ?? ""

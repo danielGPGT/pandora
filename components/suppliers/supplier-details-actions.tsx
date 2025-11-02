@@ -7,7 +7,7 @@ import { Pencil, Trash2 } from "lucide-react"
 import { EditSupplierDialog } from "@/components/suppliers/edit-supplier-dialog"
 import { DeleteSupplierDialog } from "@/components/suppliers/delete-supplier-dialog"
 import { useRouter } from "next/navigation"
-import type { Supplier } from "@/components/reuseable/data-table/data-table-08-suppliers"
+import type { Supplier } from "@/components/reusable/data-table/data-table-08-suppliers"
 
 type SupplierDetailsActionsProps = {
   supplier: Supplier | any

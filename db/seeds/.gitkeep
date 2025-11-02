@@ -1,0 +1,8 @@
+# Database Seed Files
+
+This directory contains seed data for development and testing.
+
+## Usage
+
+Seed files are typically run after migrations to populate initial data.
+

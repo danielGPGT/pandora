@@ -141,6 +141,7 @@ export async function updateSupplier(id: string, data: Partial<SupplierFormData>
     .select("*")
     .eq("id", id)
     .eq("organization_id", auth.organization_id)
+    .is("deleted_at", null) // Exclude soft-deleted
     .single()
 
   const { data: supplier, error } = await supabase
@@ -148,6 +149,7 @@ export async function updateSupplier(id: string, data: Partial<SupplierFormData>
     .update({ ...data, updated_at: new Date().toISOString() })
     .eq("id", id)
     .eq("organization_id", auth.organization_id)
+    .is("deleted_at", null) // Can't update soft-deleted
     .select()
     .single()
 
@@ -174,14 +176,20 @@ export async function deleteSupplier(id: string) {
   if (!auth || !auth.organization_id) throw new Error("Unauthorized")
   const supabase = await createClient()
 
-  // Get old values for audit log before deletion
-  const { data: oldSupplier } = await supabase
+  // Get old values for audit log before soft deletion
+  const { data: oldSupplier, error: fetchError } = await supabase
     .from("suppliers")
     .select("*")
     .eq("id", id)
     .eq("organization_id", auth.organization_id)
-    .single()
+    .is("deleted_at", null) // Only soft delete if not already deleted
+    .maybeSingle()
 
+  if (fetchError || !oldSupplier) {
+    throw new Error("Supplier not found or already deleted")
+  }
+
+  // Check for existing contracts
   const { data: contracts } = await supabase
     .from("contracts")
     .select("id")
@@ -192,11 +200,14 @@ export async function deleteSupplier(id: string) {
     throw new Error("Cannot delete supplier with existing contracts")
   }
 
+  // Soft delete: set deleted_at timestamp
+  const deletedAt = new Date().toISOString()
   const { error } = await supabase
     .from("suppliers")
-    .delete()
+    .update({ deleted_at: deletedAt })
     .eq("id", id)
     .eq("organization_id", auth.organization_id)
+    .is("deleted_at", null) // Prevent double deletion
 
   if (error) throw error
 
@@ -206,8 +217,50 @@ export async function deleteSupplier(id: string) {
     entity_type: "supplier",
     entity_id: id,
     action: "delete",
-    old_values: oldSupplier || null,
-    new_values: null,
+    old_values: oldSupplier,
+    new_values: { ...oldSupplier, deleted_at: deletedAt },
+    changed_by: auth.userTableId || null,
+  })
+
+  revalidatePath("/suppliers")
+}
+
+export async function restoreSupplier(id: string) {
+  const auth = await getCurrentUserOrg()
+  if (!auth || !auth.organization_id) throw new Error("Unauthorized")
+  const supabase = await createClient()
+
+  // Get deleted supplier
+  const { data: deletedSupplier, error: fetchError } = await supabase
+    .from("suppliers")
+    .select("*")
+    .eq("id", id)
+    .eq("organization_id", auth.organization_id)
+    .not("deleted_at", "is", null) // Only restore if deleted
+    .maybeSingle()
+
+  if (fetchError || !deletedSupplier) {
+    throw new Error("Supplier not found or not deleted")
+  }
+
+  // Restore: clear deleted_at
+  const { error } = await supabase
+    .from("suppliers")
+    .update({ deleted_at: null })
+    .eq("id", id)
+    .eq("organization_id", auth.organization_id)
+    .not("deleted_at", "is", null) // Only restore if currently deleted
+
+  if (error) throw error
+
+  // Audit log
+  await createAuditLog({
+    organization_id: auth.organization_id,
+    entity_type: "supplier",
+    entity_id: id,
+    action: "restore",
+    old_values: deletedSupplier,
+    new_values: { ...deletedSupplier, deleted_at: null },
     changed_by: auth.userTableId || null,
   })
 
@@ -227,6 +280,7 @@ export async function getSupplierWithContracts(id: string) {
     `)
     .eq("id", id)
     .eq("organization_id", auth.organization_id)
+    .is("deleted_at", null) // Exclude soft-deleted
     .single()
 
   if (error) throw error
@@ -243,6 +297,7 @@ export async function checkSupplierCodeUnique(code: string, excludeId?: string) 
     .select("id")
     .eq("organization_id", auth.organization_id)
     .eq("code", code)
+    .is("deleted_at", null) // Exclude soft-deleted
 
   if (excludeId) query = query.neq("id", excludeId)
 
@@ -261,6 +316,7 @@ export async function duplicateSupplier(id: string) {
     .select("*")
     .eq("id", id)
     .eq("organization_id", auth.organization_id)
+    .is("deleted_at", null) // Exclude soft-deleted
     .single()
 
   if (fetchError || !original) {
@@ -337,12 +393,19 @@ export async function bulkDeleteSuppliers(ids: string[]) {
   if (!auth || !auth.organization_id) throw new Error("Unauthorized")
   const supabase = await createClient()
 
-  // Get old values for audit log before deletion
+  if (!ids.length) return
+
+  // Get old values for audit log before soft deletion
   const { data: oldSuppliers } = await supabase
     .from("suppliers")
     .select("*")
     .in("id", ids)
     .eq("organization_id", auth.organization_id)
+    .is("deleted_at", null) // Only soft delete if not already deleted
+
+  if (!oldSuppliers || oldSuppliers.length === 0) {
+    throw new Error("No suppliers found to delete")
+  }
 
   // Check for existing contracts
   const { data: contracts } = await supabase
@@ -355,27 +418,28 @@ export async function bulkDeleteSuppliers(ids: string[]) {
     throw new Error("Cannot delete suppliers with existing contracts")
   }
 
+  // Soft delete: set deleted_at timestamp
+  const deletedAt = new Date().toISOString()
   const { error } = await supabase
     .from("suppliers")
-    .delete()
+    .update({ deleted_at: deletedAt })
     .in("id", ids)
     .eq("organization_id", auth.organization_id)
+    .is("deleted_at", null) // Prevent double deletion
 
   if (error) throw error
 
   // Audit log - log each deleted supplier
-  if (oldSuppliers) {
-    for (const oldSupplier of oldSuppliers) {
-      await createAuditLog({
-        organization_id: auth.organization_id,
-        entity_type: "supplier",
-        entity_id: oldSupplier.id,
-        action: "bulk_delete",
-        old_values: oldSupplier,
-        new_values: null,
-        changed_by: auth.userTableId || null,
-      })
-    }
+  for (const oldSupplier of oldSuppliers) {
+    await createAuditLog({
+      organization_id: auth.organization_id,
+      entity_type: "supplier",
+      entity_id: oldSupplier.id,
+      action: "delete",
+      old_values: oldSupplier,
+      new_values: { ...oldSupplier, deleted_at: deletedAt },
+      changed_by: auth.userTableId || null,
+    })
   }
 
   revalidatePath("/suppliers")
@@ -392,12 +456,14 @@ export async function bulkUpdateSupplierStatus(ids: string[], isActive: boolean)
     .select("*")
     .in("id", ids)
     .eq("organization_id", auth.organization_id)
+    .is("deleted_at", null) // Exclude soft-deleted
 
   const { error } = await supabase
     .from("suppliers")
     .update({ is_active: isActive, updated_at: new Date().toISOString() })
     .in("id", ids)
     .eq("organization_id", auth.organization_id)
+    .is("deleted_at", null) // Can't update soft-deleted
 
   if (error) throw error
 
@@ -407,6 +473,7 @@ export async function bulkUpdateSupplierStatus(ids: string[], isActive: boolean)
     .select("*")
     .in("id", ids)
     .eq("organization_id", auth.organization_id)
+    .is("deleted_at", null) // Exclude soft-deleted
 
   // Audit log - log each updated supplier
   if (oldSuppliers && newSuppliers) {

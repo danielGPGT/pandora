@@ -1,13 +1,16 @@
 "use client"
 
 import Link from "next/link"
-import { format } from "date-fns"
 import { CalendarDays, Ticket, DollarSign } from "lucide-react"
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { StatusBadge } from "@/components/ui/status-badge"
 import type { EventDetailsResult } from "@/lib/data/events"
+// Use centralized utilities
+import { formatDate } from "@/lib/utils/date"
+import { formatCurrency } from "@/lib/utils/format"
+import { formatDateRange } from "@/lib/utils/date-range"
 
 type EventBookingsCardProps = {
   bookings: EventDetailsResult["bookings"]
@@ -44,10 +47,10 @@ export function EventBookingsCard({ bookings }: EventBookingsCardProps) {
 
 function BookingCard({ booking }: { booking: EventDetailsResult["bookings"][number] }) {
   const serviceDate = booking.service_date_from
-    ? format(new Date(booking.service_date_from), "MMM dd, yyyy")
+    ? formatDate(booking.service_date_from)
     : "Date TBD"
   const serviceRange = booking.service_date_to && booking.service_date_to !== booking.service_date_from
-    ? `${serviceDate} → ${format(new Date(booking.service_date_to), "MMM dd, yyyy")}`
+    ? formatDateRange(booking.service_date_from, booking.service_date_to)
     : serviceDate
 
   const bookingHref = booking.booking ? `/bookings/${booking.booking.id}` : undefined
@@ -108,15 +111,4 @@ function BookingCard({ booking }: { booking: EventDetailsResult["bookings"][numb
   return content
 }
 
-function formatCurrency(value: number, currency?: string) {
-  try {
-    return new Intl.NumberFormat(undefined, {
-      style: "currency",
-      currency: currency || "USD",
-      maximumFractionDigits: 0,
-    }).format(value)
-  } catch (error) {
-    return value.toLocaleString()
-  }
-}
 

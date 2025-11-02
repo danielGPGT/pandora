@@ -1,0 +1,18 @@
+# API Routes
+
+This directory contains versioned API routes.
+
+## Versioning
+
+- `/api/v1/` - Version 1 API endpoints
+- Future versions: `/api/v2/`, etc.
+
+## Structure
+
+Each endpoint should follow REST conventions:
+- GET /api/v1/resource - List resources
+- GET /api/v1/resource/:id - Get single resource
+- POST /api/v1/resource - Create resource
+- PUT /api/v1/resource/:id - Update resource
+- DELETE /api/v1/resource/:id - Delete resource
+

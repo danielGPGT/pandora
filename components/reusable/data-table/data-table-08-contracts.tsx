@@ -16,11 +16,13 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { MoreVertical, Pencil, Trash2, Eye, Calendar, DollarSign, Percent, Download, Copy, X, Power } from "lucide-react"
-import { format } from "date-fns"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { deleteContract, bulkDeleteContracts, bulkUpdateContractStatus, bulkDuplicateContracts, updateContract } from "@/lib/actions/contracts"
-import { DataTable08 } from "@/components/reuseable/data-table/data-table-08"
+import { DataTable08 } from "@/components/reusable/data-table/data-table-08"
+// Use centralized utilities
+import { formatDate } from "@/lib/utils/date"
+import { formatCurrency } from "@/lib/utils/format"
 
 export type Contract = {
   id: string
@@ -54,24 +56,16 @@ const statusVariantMap: Record<Contract["status"], "success" | "warning" | "info
   cancelled: "destructive",
 }
 
-function formatCurrency(amount: number | null, currency: string | null) {
-  if (!amount) return "-"
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: currency || "USD",
-  }).format(amount)
-}
-
-function formatDate(dateString: string) {
-  try {
-    return format(new Date(dateString), "MMM dd, yyyy")
-  } catch {
-    return dateString
-  }
-}
+// Formatting functions moved to lib/utils - see imports above
 
 // Inline editable cells
-function EditableContractNameCell({ row, onUpdate }: { row: any; onUpdate: (id: string, value: string | null) => Promise<void> }) {
+function EditableContractNameCell({ 
+  row, 
+  onUpdate 
+}: { 
+  row: { original: Contract }
+  onUpdate: (id: string, value: string | null) => Promise<void> 
+}) {
   const [isEditing, setIsEditing] = useState(false)
   const currentValue = (row.original.contract_name ?? "") as string
   const [value, setValue] = useState(currentValue)
@@ -128,7 +122,13 @@ function EditableContractNameCell({ row, onUpdate }: { row: any; onUpdate: (id: 
   )
 }
 
-function EditableTotalCostCell({ row, onUpdate }: { row: any; onUpdate: (id: string, value: number | null) => Promise<void> }) {
+function EditableTotalCostCell({ 
+  row, 
+  onUpdate 
+}: { 
+  row: { original: Contract }
+  onUpdate: (id: string, value: number | null) => Promise<void> 
+}) {
   const [isEditing, setIsEditing] = useState(false)
   const currentValue = row.original.total_cost as number | null
   const [value, setValue] = useState(currentValue ? String(currentValue) : "")
@@ -197,7 +197,13 @@ function EditableTotalCostCell({ row, onUpdate }: { row: any; onUpdate: (id: str
   )
 }
 
-function EditableCommissionCell({ row, onUpdate }: { row: any; onUpdate: (id: string, value: number | null) => Promise<void> }) {
+function EditableCommissionCell({ 
+  row, 
+  onUpdate 
+}: { 
+  row: { original: Contract }
+  onUpdate: (id: string, value: number | null) => Promise<void> 
+}) {
   const [isEditing, setIsEditing] = useState(false)
   const currentValue = row.original.commission_rate as number | null
   const [value, setValue] = useState(currentValue ? String(currentValue) : "")
@@ -273,7 +279,13 @@ function EditableCommissionCell({ row, onUpdate }: { row: any; onUpdate: (id: st
   )
 }
 
-function EditableStatusCell({ row, onUpdate }: { row: any; onUpdate: (id: string, value: Contract["status"]) => Promise<void> }) {
+function EditableStatusCell({ 
+  row, 
+  onUpdate 
+}: { 
+  row: { original: Contract }
+  onUpdate: (id: string, value: Contract["status"]) => Promise<void> 
+}) {
   const [isSaving, setIsSaving] = useState(false)
   const [isOpen, setIsOpen] = useState(false)
   const status = row.getValue("status") as Contract["status"]
@@ -424,7 +436,7 @@ export function ContractsDataTable08({
   }
 
   // Update handler for inline edits
-  const handleFieldUpdate = (field: string) => async (id: string, value: any) => {
+  const handleFieldUpdate = (field: keyof Contract) => async (id: string, value: string | number | null) => {
     await updateContract(id, { [field]: value })
     // Optimistically update local data
     setData((prev) => prev.map((c) => (c.id === id ? { ...c, [field]: value } : c)))

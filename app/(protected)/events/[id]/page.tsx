@@ -16,6 +16,10 @@ import { EditEventButton } from "@/components/events/edit-event-button"
 import { DuplicateEventButton } from "@/components/events/duplicate-event-button"
 import { getEventDetails, type EventDetailsResult } from "@/lib/data/events"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+// Use centralized utilities
+import { getEventStatusVariant, formatStatusLabel } from "@/lib/utils/status"
+import { buildLoadErrorMessages, EVENT_ERROR_MESSAGES } from "@/lib/utils/errors"
+import { logger } from "@/lib/middleware/logging"
 
 type EventDetailsPageProps = {
   params: Promise<{ id: string }>
@@ -23,18 +27,26 @@ type EventDetailsPageProps = {
 
 export default async function EventDetailsPage({ params }: EventDetailsPageProps) {
   const { id } = await params
-  const details = await getEventDetails(id)
+  
+  let details: EventDetailsResult | null = null
+  try {
+    details = await getEventDetails(id)
+  } catch (error) {
+    logger.error('Failed to fetch event details', error, { eventId: id })
+    notFound()
+  }
 
   if (!details) {
+    logger.warn('Event not found', { eventId: id })
     notFound()
   }
 
   const { event, counts, products, contracts, bookings, auditLog, loadErrors } = details
 
-  const statusVariant = getStatusVariant(event.event_status)
+  const statusVariant = getEventStatusVariant(event.event_status)
   const statusLabel = formatStatusLabel(event.event_status)
 
-  const errorMessages = buildErrorMessages(loadErrors)
+  const errorMessages = buildLoadErrorMessages(loadErrors, EVENT_ERROR_MESSAGES)
   const hasErrors = errorMessages.length > 0
 
   return (
@@ -105,53 +117,5 @@ export default async function EventDetailsPage({ params }: EventDetailsPageProps
   )
 }
 
-function getStatusVariant(status: string | null): React.ComponentProps<typeof StatusBadge>["variant"] {
-  const key = (status ?? "").toLowerCase()
-  switch (key) {
-    case "active":
-    case "live":
-    case "confirmed":
-      return "success"
-    case "scheduled":
-      return "info"
-    case "completed":
-      return "default"
-    case "cancelled":
-    case "canceled":
-      return "destructive"
-    default:
-      return "warning"
-  }
-}
-
-function formatStatusLabel(status: string | null) {
-  if (!status) return "Uncategorised"
-  return status.replaceAll("_", " ").replace(/\b\w/g, (char) => char.toUpperCase())
-}
-
-function buildErrorMessages(loadErrors: EventDetailsResult["loadErrors"]) {
-  const messages: string[] = []
-
-  if (loadErrors.products) {
-    messages.push("We couldn't load linked products.")
-  }
-
-  if (loadErrors.contracts) {
-    messages.push("We couldn't load associated contracts.")
-  }
-
-  if (loadErrors.bookings) {
-    messages.push("Upcoming booking information may be incomplete.")
-  }
-
-  if (loadErrors.auditLog) {
-    messages.push("Recent activity timeline is unavailable.")
-  }
-
-  if (loadErrors.counts) {
-    messages.push("Summary metrics may be out of date.")
-  }
-
-  return messages
-}
+// Helper functions moved to lib/utils - see imports above
 

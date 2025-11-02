@@ -1,4 +1,4 @@
-import { notFound, redirect } from "next/navigation"
+import { notFound } from "next/navigation"
 import { getSupplierWithContracts } from "@/lib/actions/suppliers"
 import { getAuditLogs } from "@/lib/actions/audit-logs"
 import { DetailsPageLayout } from "@/components/protected/details-page-layout"
@@ -6,26 +6,37 @@ import { StatusBadge } from "@/components/ui/status-badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
-import { Mail, Phone, MapPin, FileText, Clock, Pencil } from "lucide-react"
+import { Mail, Phone, MapPin, FileText } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { SupplierDetailsActions } from "@/components/suppliers/supplier-details-actions"
 import { ContractsDataTable, type Contract } from "@/components/contracts/contracts-data-table"
 import { ActivityTimeline, type AuditLogEntry } from "@/components/audit/activity-timeline"
+// Use reusable components
+import { InfoRow } from "@/components/reusable/info-row"
+import { EmptyState } from "@/components/reusable/empty-state"
+// Use utilities
+import { valueOrDash } from "@/lib/utils/value"
+import { NotFoundError } from "@/lib/errors"
+import { logger } from "@/lib/middleware/logging"
 
 export default async function SupplierDetailsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   let supplier
+  
   try {
     supplier = await getSupplierWithContracts(id)
   } catch (error) {
+    logger.error('Failed to fetch supplier', error, { supplierId: id })
     notFound()
   }
 
   if (!supplier) {
+    logger.warn('Supplier not found', { supplierId: id })
     notFound()
   }
 
-  const contracts = (supplier.contracts as any[]) || []
+  // Type assertion - contracts should be properly typed in getSupplierWithContracts
+  const contracts = (supplier.contracts ?? []) as Contract[]
 
   // Fetch audit logs for this supplier
   const auditLogsResult = await getAuditLogs({
@@ -62,8 +73,8 @@ export default async function SupplierDetailsPage({ params }: { params: Promise<
                 <CardTitle>Basic Information</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                <InfoRow label="Supplier Code" value={supplier.code} />
-                <InfoRow label="Type" value={supplier.supplier_type || "-"} />
+                <InfoRow label="Supplier Code" value={supplier.code} copyable />
+                <InfoRow label="Type" value={valueOrDash(supplier.supplier_type)} />
                 <InfoRow
                   label="Status"
                   value={<StatusBadge variant={supplier.is_active ? "success" : "warning"}>{supplier.is_active ? "Active" : "Inactive"}</StatusBadge>}
@@ -78,8 +89,22 @@ export default async function SupplierDetailsPage({ params }: { params: Promise<
                 <CardTitle>Contact Information</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                {supplier.email && <InfoRow label="Email" value={supplier.email} icon={<Mail className="h-4 w-4" />} copyable />}
-                {supplier.phone && <InfoRow label="Phone" value={supplier.phone} icon={<Phone className="h-4 w-4" />} copyable />}
+                {supplier.email && (
+                  <InfoRow 
+                    label="Email" 
+                    value={supplier.email} 
+                    icon={<Mail className="h-4 w-4" />} 
+                    copyable 
+                  />
+                )}
+                {supplier.phone && (
+                  <InfoRow 
+                    label="Phone" 
+                    value={supplier.phone} 
+                    icon={<Phone className="h-4 w-4" />} 
+                    copyable 
+                  />
+                )}
                 {(supplier.address_line1 || supplier.city || supplier.country) && (
                   <InfoRow
                     label="Address"
@@ -130,19 +155,19 @@ export default async function SupplierDetailsPage({ params }: { params: Promise<
           </div>
 
           {contracts.length === 0 ? (
-            <Card>
-              <CardContent className="flex flex-col items-center justify-center py-12">
-                <FileText className="h-12 w-12 text-muted-foreground mb-4" />
-                <h3 className="text-lg font-semibold mb-2">No contracts yet</h3>
-                <p className="text-sm text-muted-foreground mb-4">Create your first contract with this supplier</p>
+            <EmptyState
+              icon={<FileText className="h-12 w-12 text-muted-foreground" />}
+              title="No contracts yet"
+              description="Create your first contract with this supplier"
+              action={
                 <Button>
                   <FileText className="mr-2 h-4 w-4" />
                   Add Contract
                 </Button>
-              </CardContent>
-            </Card>
+              }
+            />
           ) : (
-            <ContractsDataTable contracts={contracts as Contract[]} />
+            <ContractsDataTable contracts={contracts} />
           )}
         </TabsContent>
 
@@ -164,25 +189,6 @@ export default async function SupplierDetailsPage({ params }: { params: Promise<
   )
 }
 
-function InfoRow({ label, value, icon, copyable }: { label: string; value: React.ReactNode; icon?: React.ReactNode; copyable?: boolean }) {
-  return (
-    <div className="flex items-start justify-between gap-4">
-      <div className="flex items-center gap-2 text-sm text-muted-foreground min-w-[120px]">
-        {icon}
-        <span>{label}</span>
-      </div>
-      <div className="text-sm font-medium text-right flex-1">{value}</div>
-    </div>
-  )
-}
-
-function InfoItem({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <div className="text-xs text-muted-foreground mb-1">{label}</div>
-      <div className="text-sm font-medium">{value}</div>
-    </div>
-  )
-}
+// Components moved to reusable folder - see imports above
 
 

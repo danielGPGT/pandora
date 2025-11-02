@@ -1004,7 +1004,7 @@ function DayMaskField({ control, namePrefix, label }: { control: any; namePrefix
             control={control}
             name={`${namePrefix}.${day}` as any}
             render={({ field }) => (
-              <label className={cn("flex items-center gap-2 rounded-md border bg-muted/20 px-3 py-2 text-xs capitalize")}> 
+              <label className={cn("flex flex-wrap items-center gap-1 text-xs capitalize")}> 
                 <Checkbox checked={Boolean(field.value)} onCheckedChange={field.onChange} />
                 {day}
               </label>

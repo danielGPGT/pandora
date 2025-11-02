@@ -5,6 +5,7 @@ import { z } from "zod"
 
 import { createClient } from "@/lib/supabase/server"
 import { createAuditLog } from "@/lib/audit/audit-log"
+import { RATE_BASIS, PRICING_MODEL, MARKUP_TYPE } from "@/lib/types/selling-rates"
 
 type AuthContext = {
   userId: string
@@ -16,8 +17,23 @@ const sellingRateSchema = z.object({
   product_id: z.string().uuid(),
   product_option_id: z.string().uuid().optional().nullable(),
   rate_name: z.string().trim().optional().nullable(),
-  rate_basis: z.string().trim().min(1, "Rate basis is required"),
-  pricing_model: z.string().trim().min(1, "Pricing model is required"),
+  rate_basis: z.enum([RATE_BASIS.PER_NIGHT, RATE_BASIS.PER_PERSON, RATE_BASIS.PER_ITEM, RATE_BASIS.PER_BOOKING, RATE_BASIS.FLAT_RATE], {
+    required_error: "Rate basis is required",
+  }),
+  pricing_model: z.enum([
+    PRICING_MODEL.STANDARD,
+    PRICING_MODEL.EXTRA_NIGHT,
+    PRICING_MODEL.WEEKEND,
+    PRICING_MODEL.PER_PERSON,
+    PRICING_MODEL.TIERED,
+    PRICING_MODEL.PASS_TYPE,
+    PRICING_MODEL.SEASONAL,
+    PRICING_MODEL.EARLY_BIRD,
+    PRICING_MODEL.LAST_MINUTE,
+    PRICING_MODEL.OCCUPANCY_BASED,
+  ], {
+    required_error: "Pricing model is required",
+  }),
   valid_from: z.coerce.date(),
   valid_to: z.coerce.date(),
   base_price: z.coerce.number().min(0),
@@ -26,7 +42,7 @@ const sellingRateSchema = z.object({
     .trim()
     .length(3, "Currency must be 3 letters")
     .transform((value) => value.toUpperCase()),
-  markup_type: z.string().trim().optional().nullable(),
+  markup_type: z.enum([MARKUP_TYPE.PERCENTAGE, MARKUP_TYPE.FIXED]).optional().nullable(),
   markup_amount: z.coerce.number().optional().nullable(),
   pricing_details: z.any().optional(),
   target_cost: z.coerce.number().optional().nullable(),
@@ -131,8 +147,10 @@ function ratePaths(productId: string) {
 
 async function revalidateRatePaths(productId: string) {
   for (const path of ratePaths(productId)) {
-    revalidatePath(path)
+    revalidatePath(path, "page") // Force page-level revalidation
   }
+  // Also revalidate the layout to ensure all data refreshes
+  revalidatePath("/products", "layout")
 }
 
 export async function createSellingRate(values: SellingRateInput) {
@@ -147,6 +165,7 @@ export async function createSellingRate(values: SellingRateInput) {
     .from("selling_rates")
     .insert({
       ...payload,
+      organization_id: auth.organization_id,
       currency: payload.currency,
     })
     .select("*")
@@ -180,6 +199,7 @@ export async function updateSellingRate(rateId: string, values: Partial<SellingR
     .from("selling_rates")
     .select("*")
     .eq("id", rateId)
+    .is("deleted_at", null) // Exclude soft-deleted
     .maybeSingle()
 
   if (fetchError || !existing) {
@@ -211,6 +231,7 @@ export async function updateSellingRate(rateId: string, values: Partial<SellingR
     .from("selling_rates")
     .update(payload)
     .eq("id", rateId)
+    .is("deleted_at", null) // Can't update soft-deleted
     .select("*")
     .single()
 
@@ -242,6 +263,7 @@ export async function setSellingRateActiveState(rateId: string, isActive: boolea
     .from("selling_rates")
     .select("*")
     .eq("id", rateId)
+    .is("deleted_at", null) // Exclude soft-deleted
     .maybeSingle()
 
   if (fetchError || !existing) {
@@ -254,6 +276,7 @@ export async function setSellingRateActiveState(rateId: string, isActive: boolea
     .from("selling_rates")
     .update({ is_active: isActive, updated_at: new Date().toISOString() })
     .eq("id", rateId)
+    .is("deleted_at", null) // Can't update soft-deleted
     .select("*")
     .single()
 
@@ -285,15 +308,22 @@ export async function deleteSellingRate(rateId: string) {
     .from("selling_rates")
     .select("*")
     .eq("id", rateId)
+    .is("deleted_at", null) // Only soft delete if not already deleted
     .maybeSingle()
 
   if (fetchError || !existing) {
-    throw new Error("Selling rate not found")
+    throw new Error("Selling rate not found or already deleted")
   }
 
   await ensureProductOwnership(existing.product_id, auth.organization_id)
 
-  const { error } = await supabase.from("selling_rates").delete().eq("id", rateId)
+  // Soft delete: set deleted_at timestamp
+  const deletedAt = new Date().toISOString()
+  const { error } = await supabase
+    .from("selling_rates")
+    .update({ deleted_at: deletedAt })
+    .eq("id", rateId)
+    .is("deleted_at", null) // Prevent double deletion
 
   if (error) {
     console.error("deleteSellingRate error", error)
@@ -306,11 +336,53 @@ export async function deleteSellingRate(rateId: string) {
     entity_id: rateId,
     action: "delete",
     old_values: existing,
-    new_values: null,
+    new_values: { ...existing, deleted_at: deletedAt },
     changed_by: auth.userTableId,
   })
 
   await revalidateRatePaths(existing.product_id)
+}
+
+export async function restoreSellingRate(rateId: string) {
+  const auth = await getCurrentUserOrg()
+  if (!auth) throw new Error("Unauthorized")
+
+  const supabase = await createClient()
+  const { data: deletedRate, error: fetchError } = await supabase
+    .from("selling_rates")
+    .select("*")
+    .eq("id", rateId)
+    .not("deleted_at", "is", null) // Only restore if deleted
+    .maybeSingle()
+
+  if (fetchError || !deletedRate) {
+    throw new Error("Selling rate not found or not deleted")
+  }
+
+  await ensureProductOwnership(deletedRate.product_id, auth.organization_id)
+
+  // Restore: clear deleted_at
+  const { error } = await supabase
+    .from("selling_rates")
+    .update({ deleted_at: null })
+    .eq("id", rateId)
+    .not("deleted_at", "is", null) // Only restore if currently deleted
+
+  if (error) {
+    throw new Error(error.message || "Failed to restore selling rate")
+  }
+
+  await createAuditLog({
+    organization_id: auth.organization_id,
+    entity_type: "selling_rate",
+    entity_id: rateId,
+    action: "restore",
+    old_values: deletedRate,
+    new_values: { ...deletedRate, deleted_at: null },
+    changed_by: auth.userTableId,
+  })
+
+  await revalidateRatePaths(deletedRate.product_id)
 }
 
 export async function duplicateSellingRate(rateId: string) {
@@ -322,6 +394,7 @@ export async function duplicateSellingRate(rateId: string) {
     .from("selling_rates")
     .select("*")
     .eq("id", rateId)
+    .is("deleted_at", null) // Can't duplicate soft-deleted
     .maybeSingle()
 
   if (fetchError || !existing) {
@@ -344,6 +417,7 @@ export async function duplicateSellingRate(rateId: string) {
       .eq("product_id", existing.product_id)
       .eq("product_option_id", existing.product_option_id)
       .eq("rate_name", name)
+      .is("deleted_at", null) // Exclude soft-deleted
       .limit(1)
 
     if (!conflict || conflict.length === 0) break
@@ -372,7 +446,10 @@ export async function duplicateSellingRate(rateId: string) {
 
   const { data, error } = await supabase
     .from("selling_rates")
-    .insert(payload)
+    .insert({
+      ...payload,
+      organization_id: auth.organization_id,
+    })
     .select("*")
     .single()
 

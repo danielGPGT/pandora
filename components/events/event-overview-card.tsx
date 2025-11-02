@@ -1,13 +1,15 @@
 "use client"
 
 import Image from "next/image"
-import { format, formatDistanceToNow } from "date-fns"
 import { CalendarDays, Clock, MapPin, Info } from "lucide-react"
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import type { EventDetailsResult } from "@/lib/data/events"
+// Use centralized utilities
+import { formatEventDateRange, getEventCountdown } from "@/lib/utils/date-range"
+import { formatCurrency } from "@/lib/utils/format"
 
 type EventOverviewCardProps = {
   event: EventDetailsResult["event"]
@@ -45,55 +47,18 @@ const metricConfig: Array<{
     format: (value, counts) => {
       if (!value) return "0"
       if (counts.revenueCurrency) {
-        try {
-          return new Intl.NumberFormat(undefined, {
-            style: "currency",
-            currency: counts.revenueCurrency,
-            maximumFractionDigits: 0,
-          }).format(value)
-        } catch (error) {
-          return value.toLocaleString()
-        }
+        return formatCurrency(value, counts.revenueCurrency, undefined, { maximumFractionDigits: 0 })
       }
       return value.toLocaleString()
     },
   },
 ]
 
-function formatDateRange(event: EventDetailsResult["event"]) {
-  const from = event.event_date_from ? new Date(event.event_date_from) : null
-  const to = event.event_date_to ? new Date(event.event_date_to) : null
-
-  if (!from) return "No start date"
-
-  if (!to || from.getTime() === to.getTime()) {
-    return format(from, "MMM dd, yyyy")
-  }
-
-  return `${format(from, "MMM dd, yyyy")} — ${format(to, "MMM dd, yyyy")}`
-}
-
-function getCountdown(event: EventDetailsResult["event"]) {
-  const now = Date.now()
-  const from = new Date(event.event_date_from).getTime()
-  const to = new Date(event.event_date_to).getTime()
-
-  if (Number.isNaN(from) || Number.isNaN(to)) return null
-
-  if (from > now) {
-    return `Starts ${formatDistanceToNow(new Date(from), { addSuffix: true })}`
-  }
-
-  if (to > now) {
-    return `Ends ${formatDistanceToNow(new Date(to), { addSuffix: true })}`
-  }
-
-  return `Ended ${formatDistanceToNow(new Date(to), { addSuffix: true })}`
-}
+// Formatting functions moved to lib/utils/date-range - see imports above
 
 export function EventOverviewCard({ event, counts }: EventOverviewCardProps) {
-  const dateRangeLabel = formatDateRange(event)
-  const countdown = getCountdown(event)
+  const dateRangeLabel = formatEventDateRange(event)
+  const countdown = getEventCountdown(event)
 
   return (
     <Card className="overflow-hidden">

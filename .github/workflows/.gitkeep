@@ -1,0 +1,10 @@
+# GitHub Actions Workflows
+
+This directory contains CI/CD workflows for GitHub Actions.
+
+Example workflows to consider:
+- `ci.yml` - Continuous Integration
+- `cd.yml` - Continuous Deployment
+- `type-check.yml` - Type checking
+- `test.yml` - Test runs
+

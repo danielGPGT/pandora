@@ -5,12 +5,14 @@ import { Button } from "@/components/ui/button"
 import { StatusBadge } from "@/components/ui/status-badge"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { MoreVertical, Pencil, Trash2, Eye, Calendar, DollarSign, Percent } from "lucide-react"
-import { format } from "date-fns"
 import { useRouter } from "next/navigation"
 import { useState } from "react"
 import { toast } from "sonner"
 import { deleteContract } from "@/lib/actions/contracts"
-import { DataTable08 } from "@/components/reuseable/data-table/data-table-08"
+import { DataTable08 } from "@/components/reusable/data-table/data-table-08"
+// Use centralized utilities
+import { formatDate } from "@/lib/utils/date"
+import { formatCurrency } from "@/lib/utils/format"
 
 export type Contract = {
   id: string
@@ -39,21 +41,7 @@ const statusVariantMap: Record<Contract["status"], "success" | "warning" | "info
   cancelled: "destructive",
 }
 
-function formatCurrency(amount: number | null, currency: string | null) {
-  if (!amount) return "-"
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: currency || "USD",
-  }).format(amount)
-}
-
-function formatDate(dateString: string) {
-  try {
-    return format(new Date(dateString), "MMM dd, yyyy")
-  } catch {
-    return dateString
-  }
-}
+// Formatting functions moved to lib/utils - see imports above
 
 function RowActions({ contract, onDelete }: { contract: Contract; onDelete: (id: string) => void }) {
   const router = useRouter()

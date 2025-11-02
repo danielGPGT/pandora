@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { Layers, ArrowRight } from "lucide-react"
 import type { ProductDetailsResult } from "@/lib/data/products"
-import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { StatusBadge } from "@/components/ui/status-badge"
 import { cn } from "@/lib/utils"
@@ -16,6 +16,20 @@ type ProductOptionsCardProps = {
 }
 
 export function ProductOptionsCard({ productId, options }: ProductOptionsCardProps) {
+  const router = useRouter()
+
+  const handleManageOptions = () => {
+    // Update URL to trigger tab change
+    router.replace(`/products/${productId}?tab=options`, { scroll: false })
+    
+    // Scroll to tabs section
+    setTimeout(() => {
+      const tabsElement = document.getElementById('product-tabs')
+      if (tabsElement) {
+        tabsElement.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }
+    }, 50)
+  }
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between gap-2">
@@ -23,11 +37,9 @@ export function ProductOptionsCard({ productId, options }: ProductOptionsCardPro
           <CardTitle className="text-lg font-semibold">Product options</CardTitle>
           <CardDescription>Variants, room types, or services attached to this product.</CardDescription>
         </div>
-        <Button asChild variant="outline" size="sm" className="gap-1">
-          <Link href={`/products/${productId}?tab=options`}>
-            Manage options
-            <ArrowRight className="h-3.5 w-3.5" />
-          </Link>
+        <Button onClick={handleManageOptions} variant="outline" size="sm" className="gap-1">
+          Manage options
+          <ArrowRight className="h-3.5 w-3.5" />
         </Button>
       </CardHeader>
       <CardContent>

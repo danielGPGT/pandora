@@ -1,23 +1,15 @@
 import { GeneralPageLayout } from "@/components/protected/general-page-layout"
-import { SuppliersDataTable08, type Supplier } from "@/components/reuseable/data-table/data-table-08-suppliers"
+import { SuppliersDataTable08, type Supplier } from "@/components/reusable/data-table/data-table-08-suppliers"
 import { AddSupplierButton } from "@/components/suppliers/add-supplier-button"
-import { createClient } from "@/lib/supabase/server"
 import { suppliersQuerySchema, getSuppliersPage } from "@/lib/data/suppliers"
+import { getSuppliersSummaryStats } from "@/lib/data/summary-stats"
 import { SummaryCard } from "@/components/ui/summary-card"
 import { Users, CheckCircle2, CircleAlert, Clock } from "lucide-react"
 
 export default async function SuppliersPage({ searchParams }: { searchParams: { page?: string; pageSize?: string; q?: string } }) {
   const parsed = suppliersQuerySchema.parse(searchParams)
   const { rows, total } = await getSuppliersPage(parsed)
-  const supabase = await createClient()
-  const [activeRes, inactiveRes, newRes] = await Promise.all([
-    supabase.from("suppliers").select("id", { count: "exact", head: true }).eq("is_active", true),
-    supabase.from("suppliers").select("id", { count: "exact", head: true }).eq("is_active", false),
-    supabase
-      .from("suppliers")
-      .select("id", { count: "exact", head: true })
-      .gte("created_at", new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString()),
-  ])
+  const stats = await getSuppliersSummaryStats()
 
   return (
     <GeneralPageLayout
@@ -35,21 +27,21 @@ export default async function SuppliersPage({ searchParams }: { searchParams: { 
         />
         <SummaryCard
           title="Active"
-          value={activeRes.count ?? 0}
+          value={stats.active}
           subtitle="Suppliers currently marked as active."
           icon={<CheckCircle2 className="h-5 w-5" />}
           variant="success"
         />
         <SummaryCard
           title="Inactive"
-          value={inactiveRes.count ?? 0}
+          value={stats.inactive}
           subtitle="Suppliers paused or deactivated."
           icon={<CircleAlert className="h-5 w-5" />}
           variant="warning"
         />
         <SummaryCard
           title="New this month"
-          value={newRes.count ?? 0}
+          value={stats.newThisMonth}
           subtitle="Suppliers added since month start."
           icon={<Clock className="h-5 w-5" />}
           variant="default"

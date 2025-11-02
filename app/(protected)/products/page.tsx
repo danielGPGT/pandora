@@ -1,6 +1,6 @@
 import { GeneralPageLayout } from "@/components/protected/general-page-layout"
 import { SummaryCard } from "@/components/ui/summary-card"
-import { ProductsDataTable08, type Product } from "@/components/reuseable/data-table/data-table-08-products"
+import { ProductsDataTable08, type Product } from "@/components/reusable/data-table/data-table-08-products"
 import { AddProductButton } from "@/components/products/add-product-button"
 import { getProductsPage, getProductSummary, productsQuerySchema } from "@/lib/data/products"
 import { Package, CheckCircle2, CircleAlert, Clock } from "lucide-react"

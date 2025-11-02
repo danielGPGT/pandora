@@ -47,7 +47,11 @@ export async function getSuppliersPage(params: SuppliersQuery) {
   const from = (params.page - 1) * params.pageSize
   const to = from + params.pageSize - 1
 
-  let query = supabase.from("suppliers").select("*", { count: "exact" }).eq("organization_id", organization_id)
+  let query = supabase
+    .from("suppliers")
+    .select("*", { count: "exact" })
+    .eq("organization_id", organization_id)
+    .is("deleted_at", null) // Exclude soft-deleted
 
   if (params.q) {
     const q = `%${params.q}%`

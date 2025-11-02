@@ -146,6 +146,7 @@ export async function getEventsForSelect(): Promise<EventOption[]> {
     .from("events")
     .select("id,event_name,event_code,event_date_from,event_date_to")
     .eq("organization_id", organizationId)
+    .is("deleted_at", null) // Exclude soft-deleted
     .order("event_date_from", { ascending: true })
 
   if (error) {
@@ -187,6 +188,7 @@ export async function getEventsPage(params: EventsQuery) {
     .from("events")
     .select("*", { count: "exact" })
     .eq("organization_id", organizationId)
+    .is("deleted_at", null) // Exclude soft-deleted
 
   if (params.q) {
     const q = `%${params.q}%`
@@ -223,17 +225,20 @@ export async function getEventsSummary() {
       .from("events")
       .select("id", { count: "exact", head: true })
       .eq("organization_id", organizationId)
+      .is("deleted_at", null)
       .gt("event_date_from", today),
     supabase
       .from("events")
       .select("id", { count: "exact", head: true })
       .eq("organization_id", organizationId)
+      .is("deleted_at", null)
       .lte("event_date_from", today)
       .gte("event_date_to", today),
     supabase
       .from("events")
       .select("id", { count: "exact", head: true })
       .eq("organization_id", organizationId)
+      .is("deleted_at", null)
       .lt("event_date_to", today),
   ])
 
@@ -279,6 +284,7 @@ export async function getEventDetails(eventId: string): Promise<EventDetailsResu
     .select("*")
     .eq("organization_id", organizationId)
     .eq("id", eventId)
+    .is("deleted_at", null) // Exclude soft-deleted
     .maybeSingle()
 
   if (eventError) {
@@ -312,6 +318,7 @@ export async function getEventDetails(eventId: string): Promise<EventDetailsResu
       )
       .eq("organization_id", organizationId)
       .eq("event_id", eventId)
+      .is("deleted_at", null) // Exclude soft-deleted
       .order("updated_at", { ascending: false })
       .limit(6),
     supabase
@@ -319,7 +326,8 @@ export async function getEventDetails(eventId: string): Promise<EventDetailsResu
       .select("id", { count: "exact", head: true })
       .eq("organization_id", organizationId)
       .eq("event_id", eventId)
-      .eq("is_active", true),
+      .eq("is_active", true)
+      .is("deleted_at", null), // Exclude soft-deleted
     supabase
       .from("contracts")
       .select(
